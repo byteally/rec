@@ -73,11 +73,32 @@ instance (HasField f r a, r ~ t, ToHK t fcs, KnownSymbol f, Typeable a) => ToHK 
 toHK :: forall f t.(Applicative f, ToHK t (GenFields t (Rep t))) => t -> HK f t
 toHK = toHK' (Proxy @(GenFields t (Rep t))) (HK TRMap.empty)
 
-class FromHK t (fcs :: [Constraint]) where
-  fromHK' :: Applicative f => Proxy fcs -> HK f t -> f t
+class FromHK (t :: Type) (trep :: Type -> Type) where
+  fromHK' :: Applicative f => Proxy trep -> HK f t -> f (trep a)
 
-fromHK :: (Applicative f, ToHK t (GenFields t (Rep t))) => HK f t -> f t
-fromHK = undefined
+instance FromHK t f => FromHK t (D1 d f) where
+  fromHK' _ hk = M1 <$> fromHK' (Proxy @f) hk
+  
+instance (TypeError ('Text "Record does not support sum type: " :<>: 'ShowType t)) => FromHK t (f :+: g) where
+  fromHK' = error "Panic: Unreachable code"
+  
+instance FromHK t f => FromHK t (C1 c f) where
+  fromHK' _ hk = M1 <$> fromHK' (Proxy @f) hk
+  
+instance (FromHK t f, FromHK t g) => FromHK t (f :*: g) where
+  fromHK' _ hk = (:*:) <$> fromHK' (Proxy @f) hk
+                       <*> fromHK' (Proxy @g) hk
+  
+instance (KnownSymbol fn, Typeable a) => FromHK t (S1 ('MetaSel ('Just fn) _1 _2 _3) (K1 k a)) where
+  fromHK' _ (HK trmap) = fmap (M1 . K1) $ case TRMap.lookup @(Field fn a) trmap of
+    Just a -> unField <$> a
+    Nothing -> error "Panic: Impossible"
+    
+instance TypeError ('Text "The constructor " ':<>: 'ShowType t ':<>: 'Text " does not have named fields") => FromHK t (S1 ('MetaSel 'Nothing _1 _2 _3) k1) where
+  fromHK' = error "Panic: Unreachable code"
+
+fromHK :: forall f t.(Applicative f, FromHK t (Rep t), Generic t) => HK f t -> f t
+fromHK = fmap to . fromHK' (Proxy @(Rep t))
 
 class HoistHK t (fcs :: [Constraint]) where
   hoistHK' :: Proxy fcs -> HK g t -> (f a -> g a) -> HK f t -> HK g t
