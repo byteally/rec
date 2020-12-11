@@ -2,3 +2,4 @@ compiler: ghc
 packages:
  ./
  ../labs/record-hasfield
+ ../hedgehog-gen
