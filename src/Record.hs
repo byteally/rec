@@ -13,6 +13,8 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE DerivingVia #-}
+{-# LANGUAGE StandaloneDeriving #-}
 module Record where
 
 import GHC.Records
@@ -31,6 +33,29 @@ import Data.Functor.Identity
 
 
 newtype Sub t (xs :: [Symbol]) = Sub TMap
+
+deriving via FldsTag xs (Sub t xs) instance (Eq (FldsTag xs (Sub t xs))) => Eq (Sub t xs)
+deriving via FldsTag xs (Sub t xs) instance (Ord (FldsTag xs (Sub t xs))) => Ord (Sub t xs)
+
+instance Eq (FldsTag '[] (Sub t fs)) where
+  _ == _ =  True
+
+instance ( HasField fn t a, Eq a,
+           KnownSymbol fn,
+           Eq (FldsTag fns (Sub t fs)),
+           Typeable a
+         ) => Eq (FldsTag (fn ': fns) (Sub t fs)) where
+  FldsTag s1 == FldsTag s2 = (getField @fn s1 == getField @fn s2) && (FldsTag @fns s1 == FldsTag @fns s2)
+
+instance Ord (FldsTag '[] (Sub t fs)) where
+  _ `compare` _ =  EQ
+
+instance ( HasField fn t a, Ord a,
+           KnownSymbol fn,
+           Ord (FldsTag fns (Sub t fs)),
+           Typeable a
+         ) => Ord (FldsTag (fn ': fns) (Sub t fs)) where
+  FldsTag s1 `compare` FldsTag s2 = (getField @fn s1 `compare` getField @fn s2) `compare` (FldsTag @fns s1 `compare` FldsTag @fns s2)
 
 instance Show t => Show (Sub t fs) where
   show sub = error "TODO"
@@ -65,6 +90,8 @@ hoistHK :: forall f g t.(forall a.f a -> g a) -> HK f t -> HK g t
 hoistHK f (HK trmap) = HK $ TRMap.hoist f trmap
 
 newtype Field (s :: Symbol) t = Field { unField :: t }
+
+newtype FldsTag (fs :: [Symbol]) a = FldsTag a
 
 class DistSubHK (fs :: [Symbol]) f sub where
   distSubHK :: (Applicative f) => Proxy fs -> TypeRepMap f -> sub -> TypeRepMap f
@@ -167,18 +194,6 @@ instance (KnownSymbol fn, Typeable a) => GFromHK t (S1 ('MetaSel ('Just fn) _1 _
 
 instance TypeError ('Text "The constructor " ':<>: 'ShowType t ':<>: 'Text " does not have named fields") => GFromHK t (S1 ('MetaSel 'Nothing _1 _2 _3) k1) where
   gFromHK = error "Panic: Unreachable code"
-
-class HoistHK t (fcs :: [Constraint]) where
-  hoistHK' :: Proxy fcs -> HK g t -> (f a -> g a) -> HK f t -> HK g t
-
-instance HoistHK t '[] where
-  hoistHK' _ hk _ _ = hk
-{-
-instance (HasField f r a, r ~ t, HoistHK t fcs, KnownSymbol f, Typeable a) => HoistHK t (HasField f r a ': fcs) where
-  hoistHK' _ (HK dtmap) nat shk@(HK stmap) = case (fmap . fmap) unField $ TRMap.lookup @(Field f a) stmap of
---    Just a -> hoistHK' (Proxy @fcs) (HK $ TRMap.insert undefined dtmap) nat shk
-    Nothing -> error "Panic: Impossible"
--}
 
 {-
 type family TypeFields (t :: Type) :: [Constraint] where

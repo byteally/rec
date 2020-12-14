@@ -31,12 +31,12 @@ data T = T
     f5 :: Maybe Double,
     f6 :: Either Float (Maybe Double),
     f7 :: T1
-  } deriving (Show, Eq, Generic)
+  } deriving (Show, Eq, Ord, Generic)
 
 data T1 = T1
   { f11 :: [Int],
     f12 :: Maybe Double
-  } deriving (Show, Eq, Generic)
+  } deriving (Show, Eq, Ord, Generic)
 
 eq :: forall (f :: Symbol) t1 t2 a m.
   ( MonadTest m,
@@ -126,6 +126,17 @@ prop_distHKAndSub :: Property
 prop_distHKAndSub = property $ do
   t <- forAll $ mkGen @T emptyGens
   tripping t (toHKOfSub . project @'["f1", "f2", "f3", "f4", "f5", "f6", "f7"] . toHK @Identity) (fmap (toType @T) . fromHK)
+
+prop_SubEq :: Property
+prop_SubEq = property $ do
+  t <- forAll $ mkGen @T emptyGens
+  project @'["f1", "f7", "f5"] t === project @'["f1", "f7", "f5"] t
+
+prop_SubOrd :: Property
+prop_SubOrd = property $ do
+  t <- forAll $ mkGen @T emptyGens
+  (project @'["f1", "f7", "f5"] t `compare` project @'["f1", "f7", "f5"] t) === EQ
+
 
 tests :: IO Bool
 tests =
