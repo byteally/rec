@@ -89,6 +89,9 @@ fromHK = fromHK'
 hoistHK :: forall f g t.(forall a.f a -> g a) -> HK f t -> HK g t
 hoistHK f (HK trmap) = HK $ TRMap.hoist f trmap
 
+hoistHKA :: forall f g m t.Applicative m =>(forall a.f a -> m (g a)) -> HK f t -> m (HK g t)
+hoistHKA f (HK trmap) = HK <$> TRMap.hoistA f trmap
+
 newtype Field (s :: Symbol) t = Field { unField :: t }
 
 newtype FldsTag (fs :: [Symbol]) a = FldsTag a

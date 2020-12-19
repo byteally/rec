@@ -1,5 +1,5 @@
 compiler: ghc
 packages:
- ./
+ rec
  ../labs/record-hasfield
  ../hedgehog-gen

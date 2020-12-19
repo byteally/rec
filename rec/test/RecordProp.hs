@@ -18,6 +18,7 @@ import GHC.Generics
 import GHC.Records
 import GHC.TypeLits
 import Data.Functor.Identity
+import Data.Functor.Const
 import Control.Monad.IO.Class
 import qualified Data.TMap as TMap
 import qualified Data.TypeRepMap as TRMap
