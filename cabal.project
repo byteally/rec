@@ -1,5 +1,9 @@
 compiler: ghc
 packages:
  rec
- ../labs/record-hasfield
- ../hedgehog-gen
+ rec-aeson
+
+source-repository-package
+  type: git
+  location: git@github.com:byteally/hedgehog-gen
+  tag: 7b1cd15ae8bea4f0cac268ab2c1aee4fc33f9903
