@@ -1,4 +1,4 @@
 # Haskell Records
 
-[![GitHub CI](https://github.com/userName/repoName/workflows/CI/badge.svg)](https://github.com/userName/repoName/actions)
+[![GitHub CI](https://github.com/byteally/rec/workflows/CI/badge.svg)](https://github.com/byteally/rec/actions)
 
