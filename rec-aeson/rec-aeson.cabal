@@ -7,7 +7,7 @@ version:             0.1.0.0
 -- synopsis:
 -- description:
 -- bug-reports:
--- license:
+license:             BSD3
 license-file:        LICENSE
 author:              Magesh
 maintainer:          magesh85@gmail.com
