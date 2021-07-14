@@ -215,3 +215,74 @@ type family GenFields (t :: Type) (rep :: Type -> Type) :: [Constraint] where
   GenFields t (C1 i c) = GenFields t c
   GenFields t (f :*: g) = GenFields t f :++ GenFields t g
   GenFields t (S1 ('MetaSel ('Just sn) _ _ _) (K1 i ft)) = '[HasField sn t ft]
+
+-- | An anonymous record
+newtype Rec (xs :: [(Symbol, Type)]) = Rec TMap
+
+newtype FldsTagRec (xs :: [(Symbol, Type)]) a = FldsTagRec a
+
+instance (a ~ LookupType f xs, KnownSymbol f, Typeable a) => HasField (f :: Symbol) (Rec xs) a where
+  getField (Rec tmap) = case unField <$> TMap.lookup @(Field f a) tmap of
+    Just a -> a
+    Nothing -> error $ "Panic: Impossible: Field not found: " ++ (symbolVal (Proxy @f))
+
+type family LookupType (s :: Symbol) (xs :: [(Symbol, Type)]) :: Type where
+  LookupType fld ( '(fld, t) ': ts) = t
+  LookupType fld ( _         ': ts) = LookupType fld ts
+  LookupType fld '[]                = TypeError ('Text "Record does not have field: " :<>: 'ShowType fld)
+
+class ToRec t (xs :: [(Symbol, Type)]) where
+  toRec :: t -> Rec xs
+
+instance ToRec t '[] where
+  {-# INLINE toRec #-}
+  toRec _ = rec_
+
+instance ( HasField f t a
+         , KnownSymbol f
+         , Typeable a
+         , ToRec t fs
+         ) => ToRec t ( '(f, a) ': fs) where
+  {-# INLINE toRec #-}
+  toRec r = Rec $ TMap.insert (Field @f $ getField @f @t r) $ coerce $ toRec @t @fs r
+
+{-# INLINE rec_ #-}
+rec_ :: Rec '[]
+rec_ = Rec TMap.empty
+
+-- TODO: Duplicate fields?
+{-# INLINE cons #-}
+cons :: forall fld a xs. (KnownSymbol fld, Typeable a) => a -> Rec xs -> Rec ( '(fld, a) ': xs )
+cons a (Rec tmap) = Rec (TMap.insert (Field @fld a) tmap)
+
+deriving via FldsTagRec xs (Rec xs) instance (Eq (FldsTagRec xs (Rec xs))) => Eq (Rec xs)
+deriving via FldsTagRec xs (Rec xs) instance (Ord (FldsTagRec xs (Rec xs))) => Ord (Rec xs)
+
+instance Eq (FldsTagRec '[] (Rec xs)) where
+  _ == _ =  True
+
+instance ( Eq a,
+           KnownSymbol fn,
+           Eq (FldsTagRec xs (Rec xs0)),
+           Typeable a,
+           a ~ (LookupType fn xs0)
+         ) => Eq (FldsTagRec ( '(fn, a) ': xs) (Rec xs0)) where
+  FldsTagRec s1 == FldsTagRec s2 = (getField @fn s1 == getField @fn s2) && (FldsTagRec @xs s1 == FldsTagRec @xs s2)
+
+instance Ord (FldsTagRec '[] (Rec s)) where
+  _ `compare` _ =  EQ
+
+instance ( Ord a,
+           KnownSymbol fn,
+           Ord (FldsTagRec xs (Rec xs0)),
+           Typeable a,
+           a ~ (LookupType fn xs0)
+         ) => Ord (FldsTagRec ( '(fn, a) ': xs) (Rec xs0)) where
+  FldsTagRec s1 `compare` FldsTagRec s2 = (getField @fn s1 `compare` getField @fn s2) `compare` (FldsTagRec @xs s1 `compare` FldsTagRec @xs s2)
+
+sample =
+  cons @"fld1" True    $
+  cons @"fld2" "False" $
+  cons @"fld3" (Just True) $
+  rec_
+
