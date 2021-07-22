@@ -2,8 +2,15 @@ compiler: ghc
 packages:
  rec
  rec-aeson
+ rec-webapi
 
 source-repository-package
   type: git
   location: git@github.com:byteally/hedgehog-gen
   tag: 7b1cd15ae8bea4f0cac268ab2c1aee4fc33f9903
+
+source-repository-package
+  type: git
+  location: https://github.com/byteally/webapi
+  tag: e5529e02a15965faef26d6b3090ff3268e2304e0
+  subdir: webapi-contract
