@@ -82,8 +82,8 @@ instance {-# OVERLAPPING #-}
   ) => FromHeader (Rec ( '(fn, Maybe a) ': xs)) where
   fromHeader hds =
     case mv0 of
-      Nothing -> cons @fn Nothing <$> fromHeader hds
-      Just v0 -> cons @fn <$> (Just <$> decodeParamWithError msg (snd v0)) <*> fromHeader hds
+      Nothing -> consRec @fn Nothing <$> fromHeader hds
+      Just v0 -> consRec @fn <$> (Just <$> decodeParamWithError msg (snd v0)) <*> fromHeader hds
 
     where
       fld = fromString (symbolVal (Proxy :: Proxy fn))
@@ -101,7 +101,7 @@ instance {-# OVERLAPPABLE #-}
   fromHeader hds =
     case mv0 of
       Nothing -> lookupErr
-      Just v0 -> cons @fn <$> decodeParamWithError msg (snd v0) <*> fromHeader hds
+      Just v0 -> consRec @fn <$> decodeParamWithError msg (snd v0) <*> fromHeader hds
 
     where
       fld = symbolVal (Proxy :: Proxy fn)

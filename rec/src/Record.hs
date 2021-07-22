@@ -130,7 +130,7 @@ class Project t (xs :: [Symbol]) where
   prj :: t -> Sub t xs
 
 instance Project t '[] where
-  prj _ = Sub TMap.empty
+  prj _ = sub_
   {-# INLINE prj #-}
 
 instance ( HasField f t a
@@ -138,8 +138,22 @@ instance ( HasField f t a
          , Typeable a
          , Project t fs
          ) => Project t (f ': fs) where
-  prj r = Sub $ TMap.insert (Field @f $ getField @f @t r) $ coerce $ prj @t @fs r
+  prj r = consSub (Proxy :: Proxy f) (getField @f @t r) (prj r)
   {-# INLINE prj #-}
+
+{-# INLINE consSub #-}
+consSub ::
+  forall fld a t xs.
+  ( HasField fld t a
+  , KnownSymbol fld
+  , Typeable a
+  ) => Proxy fld -> a -> Sub t xs -> Sub t (fld ': xs)
+consSub _ a (Sub vs) =
+  Sub $ TMap.insert (Field @fld a) vs
+
+{-# INLINE sub_ #-}
+sub_ :: Sub t '[]
+sub_ = Sub TMap.empty
 
 -- TODO: check f in fs
 instance (HasField f t a, KnownSymbol f, Typeable a) => HasField (f :: Symbol) (Sub t fs) a where
@@ -251,9 +265,9 @@ rec_ :: Rec '[]
 rec_ = Rec TMap.empty
 
 -- TODO: Duplicate fields?
-{-# INLINE cons #-}
-cons :: forall fld a xs. (KnownSymbol fld, Typeable a) => a -> Rec xs -> Rec ( '(fld, a) ': xs )
-cons a (Rec tmap) = Rec (TMap.insert (Field @fld a) tmap)
+{-# INLINE consRec #-}
+consRec :: forall fld a xs. (KnownSymbol fld, Typeable a) => a -> Rec xs -> Rec ( '(fld, a) ': xs )
+consRec a (Rec tmap) = Rec (TMap.insert (Field @fld a) tmap)
 
 deriving via FldsTagRec xs (Rec xs) instance (Eq (FldsTagRec xs (Rec xs))) => Eq (Rec xs)
 deriving via FldsTagRec xs (Rec xs) instance (Ord (FldsTagRec xs (Rec xs))) => Ord (Rec xs)
@@ -281,8 +295,10 @@ instance ( Ord a,
   FldsTagRec s1 `compare` FldsTagRec s2 = (getField @fn s1 `compare` getField @fn s2) `compare` (FldsTagRec @xs s1 `compare` FldsTagRec @xs s2)
 
 sample =
-  cons @"fld1" True    $
-  cons @"fld2" "False" $
-  cons @"fld3" (Just True) $
+  consRec @"fld1" True    $
+  consRec @"fld2" "False" $
+  consRec @"fld3" (Just True) $
   rec_
 
+-- | An anonymous sum
+newtype Corec (xs :: [(Symbol, Type)]) = Corec TMap

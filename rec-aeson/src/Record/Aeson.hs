@@ -117,6 +117,40 @@ instance
     where
       fld = T.pack (symbolVal (Proxy :: Proxy fn))
 
+instance ( ToJSONSub (FldsTag xs (Sub t xs)) ) => ToJSON (Sub t xs) where
+  toJSON xs =
+    object (toJSONSub (FldsTag @xs xs))
+  toEncoding xs =
+    pairs (toEncodingSub (FldsTag @xs xs))
+
+class ToJSONSub t where
+  toJSONSub :: t -> [Pair]
+  toEncodingSub :: t -> Series
+
+instance ToJSONSub (FldsTag '[] (Sub t xs0)) where
+  toJSONSub _ = mempty
+  toEncodingSub _ = mempty
+
+instance
+  ( ToJSONSub (FldsTag xs (Sub t xs0))
+  , ToJSON a
+  , HasField fn (Sub t xs0) a
+  , KnownSymbol fn
+  ) => ToJSONSub (FldsTag ( fn ': xs) (Sub t xs0)) where
+  toJSONSub (FldsTag s) =
+    fld .= (getField @fn s :: a) :
+    toJSONSub (FldsTag @xs s)
+
+    where
+      fld = T.pack (symbolVal (Proxy :: Proxy fn))
+
+  toEncodingSub (FldsTag s) =
+    fld .= getField @fn s <>
+    toEncodingSub (FldsTag @xs s)
+
+    where
+      fld = T.pack (symbolVal (Proxy :: Proxy fn))
+
 instance ( FromJSONRec (Rec xs) ) => FromJSON (Rec xs) where
   parseJSON = withObject "Rec" $
     parseJSONRec @(Rec xs)
@@ -137,7 +171,7 @@ instance {-# OVERLAPPING #-}
   parseJSONRec o = do
     xs <- parseJSONRec @(Rec xs) o
     v <- o .:? fld
-    pure (cons @fn v xs)
+    pure (consRec @fn v xs)
 
     where
       fld = T.pack (symbolVal (Proxy :: Proxy fn))
@@ -151,7 +185,50 @@ instance {-# OVERLAPPABLE #-}
   parseJSONRec o = do
     xs <- parseJSONRec @(Rec xs) o
     v <- o .: fld
-    pure (cons @fn v xs)
+    pure (consRec @fn v xs)
 
     where
       fld = T.pack (symbolVal (Proxy :: Proxy fn))
+
+{-
+instance ( FromJSONSub (Sub t xs) ) => FromJSON (Sub t xs) where
+  parseJSON = withObject "Sub" $
+    parseJSONSub @(Sub t xs)
+
+class FromJSONSub t where
+  parseJSONSub :: Object -> Parser t
+
+instance FromJSONSub (Sub t '[]) where
+  parseJSONSub _ = pure sub_
+
+instance {-# OVERLAPPING #-}
+  ( KnownSymbol fn
+  , FromJSONSub (Sub t xs)
+  , HasField fn t (Maybe a)
+  , FromJSON a
+  , Typeable a
+  ) => FromJSONSub (Sub t ( fn ': xs)) where
+  parseJSONSub o = do
+    xs <- parseJSONSub @(Sub t xs) o
+    v <- o .:? fld
+    pure (consSub @fn v xs)
+
+    where
+      fld = T.pack (symbolVal (Proxy :: Proxy fn))
+
+instance {-# OVERLAPPABLE #-}
+  ( KnownSymbol fn
+  , FromJSONSub (Sub t xs)
+  , HasField fn t a
+  , FromJSON a
+  , Typeable a
+  ) => FromJSONSub (Sub t ( fn ': xs)) where
+  parseJSONSub o = do
+    xs <- parseJSONSub @(Sub t xs) o
+    v <- o .: fld
+    pure (consSub @fn v xs)
+
+    where
+      fld = T.pack (symbolVal (Proxy :: Proxy fn))
+
+-}
