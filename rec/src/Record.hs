@@ -62,16 +62,16 @@ instance Show t => Show (Sub t fs) where
 
 newtype HK (f :: Type -> Type) (t :: Type) = HK (TypeRepMap f)
 
-instance Show ( FldsTag (GenFieldsHK t (Rep t)) (HK f t)) => Show (HK f t) where
-  show hk = show $ FldsTag @(GenFieldsHK t (Rep t)) hk
+instance Show ( FldsTag (GenFieldsSym t (Rep t)) (HK f t)) => Show (HK f t) where
+  show hk = show $ FldsTag @(GenFieldsSym t (Rep t)) hk
   
-type family GenFieldsHK (t :: Type) (rep :: Type -> Type) :: [Symbol] where
-  GenFieldsHK t (D1 i f)  = GenFieldsHK t f
-  GenFieldsHK t (f :+: g) = TypeError ('Text "Record does not support sum type: " :<>: 'ShowType t)
-  GenFieldsHK t (C1 ('MetaCons cn _ 'False) _) = TypeError ('Text "The constructor " ':<>: 'ShowType cn ':<>: 'Text " does not have named fields")
-  GenFieldsHK t (C1 i c) = GenFieldsHK t c
-  GenFieldsHK t (f :*: g) = GenFieldsHK t f :++ GenFieldsHK t g
-  GenFieldsHK t (S1 ('MetaSel ('Just sn) _ _ _) (K1 i ft)) = '[sn]
+type family GenFieldsSym (t :: Type) (rep :: Type -> Type) :: [Symbol] where
+  GenFieldsSym t (D1 i f)  = GenFieldsSym t f
+  GenFieldsSym t (f :+: g) = TypeError ('Text "Record does not support sum type: " :<>: 'ShowType t)
+  GenFieldsSym t (C1 ('MetaCons cn _ 'False) _) = TypeError ('Text "The constructor " ':<>: 'ShowType cn ':<>: 'Text " does not have named fields")
+  GenFieldsSym t (C1 i c) = GenFieldsSym t c
+  GenFieldsSym t (f :*: g) = GenFieldsSym t f :++ GenFieldsSym t g
+  GenFieldsSym t (S1 ('MetaSel ('Just sn) _ _ _) (K1 i ft)) = '[sn]
 
 instance Show (FldsTag '[] (HK f t)) where
   show _ = ""
@@ -85,7 +85,8 @@ instance
   , KnownSymbol fn
   ) => Show (FldsTag ( fn ': ts) (HK f ts0)) where
   show (FldsTag s) =
-    show (getField @fn s :: f a) ++ show (FldsTag @ts s)
+    (fld <> " = " <> show (getField @fn s :: f a) <> ",") ++ show (FldsTag @ts s)
+    where fld = symbolVal (Proxy :: Proxy fn)
 
 project :: forall fs t.Project t fs => t -> Sub t fs
 project = prj
