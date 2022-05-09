@@ -64,7 +64,7 @@ newtype HK (f :: Type -> Type) (t :: Type) = HK (TypeRepMap f)
 
 instance Show ( FldsTag (GenFieldsSym t (Rep t)) (HK f t)) => Show (HK f t) where
   show hk = show $ FldsTag @(GenFieldsSym t (Rep t)) hk
-  
+
 type family GenFieldsSym (t :: Type) (rep :: Type -> Type) :: [Symbol] where
   GenFieldsSym t (D1 i f)  = GenFieldsSym t f
   GenFieldsSym t (f :+: g) = TypeError ('Text "Record does not support sum type: " :<>: 'ShowType t)
@@ -87,6 +87,57 @@ instance
   show (FldsTag s) =
     (fld <> " = " <> show (getField @fn s :: f a) <> ",") ++ show (FldsTag @ts s)
     where fld = symbolVal (Proxy :: Proxy fn)
+
+type family HKRep (t :: Type) (hk :: Type -> Type) (rep :: Type -> Type) :: Type -> Type where
+  HKRep t hk (D1 c f) = D1 c (HKRep t hk f)
+  HKRep t hk (f :+: g) = TypeError ('Text "Record does not support sum type: " :<>: 'ShowType t)
+  HKRep t _ (C1 ('MetaCons cn _ 'False) _) = TypeError ('Text "The constructor " ':<>: 'ShowType cn ':<>: 'Text " does not have named fields")
+  HKRep t hk (C1 c f) = C1 c (HKRep t hk f)
+  HKRep t hk (f :*: g) = (HKRep t hk f :*: HKRep t hk g)
+  HKRep t hk (S1 c f) = S1 c (HKRep t hk f)
+  HKRep t hk (K1 i a) = K1 i (hk a)
+
+instance (Generic t, GTo f (HKRep t f (Rep t)), Rep (HK f t) ~ HKRep t f (Rep t), GFrom t f (HKRep t f (Rep t))) => Generic (HK f t) where
+  type Rep (HK f t) = HKRep t f (Rep t)
+  to r = HK $ gTo r TRMap.empty
+  from hk = gFrom hk
+
+class GTo (hk :: Type -> Type) (rep :: Type -> Type) where
+  gTo :: rep a -> TypeRepMap hk -> TypeRepMap hk
+
+instance GTo hk f => GTo hk (D1 c f) where
+  gTo (M1 f) tmap = gTo f tmap
+
+instance GTo hk f => GTo hk (C1 c f) where
+  gTo (M1 f) tmap = gTo f tmap
+
+instance (GTo hk f, GTo hk g) => GTo hk (f :*: g) where
+  gTo (f :*: g) tmap = gTo g (gTo f tmap)
+
+-- TODO: Have type custom error for hk eq failure
+instance (KnownSymbol fn, Typeable a, hk ~ hk', Coercible (hk' a) (hk' (Field fn a))) => GTo hk (S1 ('MetaSel ('Just fn) _1 _2 _3) (K1 k (hk' a))) where
+  gTo (M1 (K1 v)) tmap = TRMap.insert ((coerce :: hk' a -> hk' (Field fn a)) v) tmap
+
+instance TypeError ('Text "Panic @GTo! The constructor does not have named fields") => GTo hk (S1 ('MetaSel 'Nothing _1 _2 _3) k1) where
+  gTo = error "Panic: Unreachable code"
+
+class GFrom (t :: Type) (hk :: Type -> Type) (rep :: Type -> Type) where
+  gFrom :: HK hk t -> rep x
+
+instance GFrom t hk f => GFrom t hk (D1 c f) where
+  gFrom hk = M1 $ gFrom hk
+
+instance GFrom t hk f => GFrom t hk (C1 c f) where
+  gFrom hk = M1 $ gFrom hk
+
+instance (GFrom t hk f, GFrom t hk g) => GFrom t hk (f :*: g) where
+  gFrom hk = gFrom hk :*: gFrom hk
+
+instance (hk ~ hk', HasField fn t a, KnownSymbol fn, Typeable a, Functor hk') => GFrom t hk (S1 ('MetaSel ('Just fn) _1 _2 _3) (K1 k (hk' a))) where
+  gFrom hk = M1 $ K1 $ getField @fn hk
+
+instance TypeError ('Text "Panic @GTo! The constructor does not have named fields") => GFrom t hk (S1 ('MetaSel 'Nothing _1 _2 _3) k1) where
+  gFrom = error "Panic: Unreachable code"
 
 project :: forall fs t.Project t fs => t -> Sub t fs
 project = prj
