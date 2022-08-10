@@ -14,6 +14,8 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
+
 module Record.Aeson where
 
 import Record
@@ -27,6 +29,7 @@ import Data.Kind
 import Data.Typeable
 import Data.Coerce
 import GHC.Records
+import Data.String
 
 
 newtype Arr f a = Arr (f a)
@@ -104,18 +107,18 @@ instance
   , KnownSymbol fn
   ) => ToJSONRec (FldsTagRec ( '(fn, a) ': xs) (Rec xs0)) where
   toJSONRec (FldsTagRec s) =
-    fld .= (getField @fn s :: a) :
+    fromString fld .= (getField @fn s :: a) :
     toJSONRec (FldsTagRec @xs s)
 
     where
-      fld = T.pack (symbolVal (Proxy :: Proxy fn))
+      fld = symbolVal (Proxy :: Proxy fn)
 
   toEncodingRec (FldsTagRec s) =
-    fld .= getField @fn s <>
+    fromString fld .= getField @fn s <>
     toEncodingRec (FldsTagRec @xs s)
 
     where
-      fld = T.pack (symbolVal (Proxy :: Proxy fn))
+      fld = symbolVal (Proxy :: Proxy fn)
 
 instance ( ToJSONSub (FldsTag xs (Sub t xs)) ) => ToJSON (Sub t xs) where
   toJSON xs =
@@ -138,18 +141,18 @@ instance
   , KnownSymbol fn
   ) => ToJSONSub (FldsTag ( fn ': xs) (Sub t xs0)) where
   toJSONSub (FldsTag s) =
-    fld .= (getField @fn s :: a) :
+    fromString fld .= (getField @fn s :: a) :
     toJSONSub (FldsTag @xs s)
 
     where
-      fld = T.pack (symbolVal (Proxy :: Proxy fn))
+      fld = symbolVal (Proxy :: Proxy fn)
 
   toEncodingSub (FldsTag s) =
-    fld .= getField @fn s <>
+    fromString fld .= getField @fn s <>
     toEncodingSub (FldsTag @xs s)
 
     where
-      fld = T.pack (symbolVal (Proxy :: Proxy fn))
+      fld = symbolVal (Proxy :: Proxy fn)
 
 instance ( FromJSONRec (Rec xs) ) => FromJSON (Rec xs) where
   parseJSON = withObject "Rec" $
@@ -170,11 +173,11 @@ instance {-# OVERLAPPING #-}
   ) => FromJSONRec (Rec ( '(fn, Maybe a) ': xs)) where
   parseJSONRec o = do
     xs <- parseJSONRec @(Rec xs) o
-    v <- o .:? fld
+    v <- o .:? fromString fld
     pure (consRec @fn v xs)
 
     where
-      fld = T.pack (symbolVal (Proxy :: Proxy fn))
+      fld = symbolVal (Proxy :: Proxy fn)
 
 instance {-# OVERLAPPABLE #-}
   ( KnownSymbol fn
@@ -184,11 +187,11 @@ instance {-# OVERLAPPABLE #-}
   ) => FromJSONRec (Rec ( '(fn, a) ': xs)) where
   parseJSONRec o = do
     xs <- parseJSONRec @(Rec xs) o
-    v <- o .: fld
+    v <- o .: fromString fld
     pure (consRec @fn v xs)
 
     where
-      fld = T.pack (symbolVal (Proxy :: Proxy fn))
+      fld = symbolVal (Proxy :: Proxy fn)
 
 {-
 instance ( FromJSONSub (Sub t xs) ) => FromJSON (Sub t xs) where

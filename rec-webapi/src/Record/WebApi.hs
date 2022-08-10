@@ -13,6 +13,7 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Record.WebApi where
 

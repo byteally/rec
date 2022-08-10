@@ -3,7 +3,7 @@ cabal-version:       >=1.10
 --   For further documentation, see http://haskell.org/cabal/users-guide/
 
 name:                rec-aeson
-version:             0.1.0.0
+version:             0.2.0.0
 -- synopsis:
 -- description:
 -- bug-reports:
@@ -20,7 +20,7 @@ library
   exposed-modules:     Record.Aeson
   -- other-modules:
   -- other-extensions:
-  build-depends:       base >=4.13 && <4.14
+  build-depends:       base >=4.13 && < 5
                      , rec
                      , aeson
                      , record-hasfield >= 1.0
@@ -34,7 +34,7 @@ test-suite rec-aeson-test
   other-modules:       RecordAesonTest
   hs-source-dirs:      test
   main-is:             Spec.hs
-  build-depends:       base >=4.13 && <4.14
+  build-depends:       base >=4.13 && < 5
                      , rec-aeson
                      , rec
                      , aeson
