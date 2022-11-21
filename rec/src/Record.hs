@@ -15,8 +15,32 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE StandaloneDeriving #-}
-module Record where
+{-# LANGUAGE ConstraintKinds #-}
+module Record
+  ( Sub
+  , Sup
+  , HK
+  , Rec
+  , Corec
+  , project
+  , sub_
+  , consSub
+  , joinSub
+  , toType
+  , toHK
+  , fromHK
+  , emptyHK
+  , pointedHK
+  , hoistHK
+  , hoistHKA
+  , toHKOfSub
+  , toSubOfHK
+  , toRec
+  , rec_
+  , consRec
+  ) where
 
+import Control.Applicative (empty, Alternative)
 import GHC.Records
 import GHC.TypeLits
 import Data.Kind
@@ -33,6 +57,12 @@ import Data.Functor.Identity
 
 
 newtype Sub t (xs :: [Symbol]) = Sub TMap
+
+data Sup t (xs :: [(Symbol, Type)]) = Sup !t !(Rec xs)
+
+instance HasField f t a => HasField f (Sup t '[]) a where
+  getField (Sup t _) = getField @f t
+  {-# INLINE getField #-}
 
 deriving via FldsTag xs (Sub t xs) instance (Eq (FldsTag xs (Sub t xs))) => Eq (Sub t xs)
 deriving via FldsTag xs (Sub t xs) instance (Ord (FldsTag xs (Sub t xs))) => Ord (Sub t xs)
@@ -141,32 +171,66 @@ instance TypeError ('Text "Panic @GTo! The constructor does not have named field
 
 project :: forall fs t.Project t fs => t -> Sub t fs
 project = prj
+{-# INLINE project #-}
 
 toType :: forall r t fs.FromHK r => Sub t fs -> r
 toType (Sub tmap) = runIdentity $ fromHK $ HK tmap
+{-# INLINE toType #-}
+
+extend :: ValidateExt t xs => t -> Rec xs -> Sup t xs
+extend t r = Sup t r
+{-# INLINE extend #-}
 
 toHKOfSub :: forall fs f a.(DistSubHK fs f (Sub (HK f a) fs), Applicative f) => Sub (HK f a) fs -> HK f (Sub a fs)
 toHKOfSub = HK . distSubHK (Proxy @fs) TRMap.empty
+{-# INLINE toHKOfSub #-}
 
 toSubOfHK :: forall fs f a.(DistSubHK fs Identity (HK f (Sub a fs)), Applicative f) => HK f (Sub a fs) -> Sub (HK f a) fs
 toSubOfHK = Sub . distSubHK (Proxy @fs) TRMap.empty
+{-# INLINE toSubOfHK #-}
 
 joinSub :: Sub (Sub t fs1) fs -> Sub t fs
 joinSub = coerce
 
 toHK :: forall f t.(Applicative f, ToHK t) => t -> HK f t
 toHK = toHK'
+{-# INLINE toHK #-}
 
 fromHK :: forall f t.(Applicative f, FromHK t) => HK f t -> f t
 fromHK = fromHK'
+{-# INLINE fromHK #-}
 
 hoistHK :: forall f g t.(forall a.f a -> g a) -> HK f t -> HK g t
 hoistHK f (HK trmap) = HK $ TRMap.hoist f trmap
+{-# INLINE hoistHK #-}
 
 hoistHKA :: forall f g m t.Applicative m =>(forall a.f a -> m (g a)) -> HK f t -> m (HK g t)
 hoistHKA f (HK trmap) = HK <$> TRMap.hoistA f trmap
+{-# INLINE hoistHKA #-}
+
+pointedHK :: forall f t.GEmptyHK t (TypeFields t) => (forall a. f a) -> HK f t
+pointedHK pointf = HK $ gEmptyHK (Proxy @'(TypeFields t, t)) pointf
+{-# INLINE pointedHK #-}
+
+emptyHK :: forall f t.(Alternative f, GEmptyHK t (TypeFields t)) => HK f t
+emptyHK = HK $ gEmptyHK (Proxy @'(TypeFields t, t)) empty
+{-# INLINE emptyHK #-}
+
+class GEmptyHK t (fcs :: [RecFieldK]) where
+  gEmptyHK :: Proxy '(fcs, t) -> (forall a. f a) -> TypeRepMap f
+
+instance GEmptyHK t '[] where
+  gEmptyHK _ _ = TRMap.empty
+  {-# INLINE gEmptyHK #-}
+
+instance (HasField f r a, GEmptyHK t fcs, KnownSymbol f, Typeable a) => GEmptyHK t (HasField (f :: Symbol) r ': fcs) where
+  gEmptyHK _ pointf = TRMap.insert (pointf @a) $ gEmptyHK (Proxy @'(fcs, t)) pointf
+  {-# INLINE gEmptyHK #-}
 
 newtype Field (s :: Symbol) t = Field { unField :: t }
+
+type RecFieldK = Type -> Constraint
+type RecField (s :: Symbol) t = HasField s t
 
 newtype FldsTag (fs :: [Symbol]) a = FldsTag a
 
@@ -175,6 +239,7 @@ class DistSubHK (fs :: [Symbol]) f sub where
 
 instance DistSubHK '[] f t where
   distSubHK _ hk _ = hk
+  {-# INLINE distSubHK #-}
 
 instance
   ( HasField fn (Sub (HK f a) fs) (f t),
@@ -184,6 +249,7 @@ instance
     Typeable t
   ) => DistSubHK (fn ': fns) f (Sub (HK f a) fs) where
   distSubHK _ trmap sub = distSubHK (Proxy @fns) (TRMap.insert (fmap (Field @fn) (getField @fn sub)) trmap) sub
+  {-# INLINE distSubHK #-}
 
 instance
   ( HasField fn (HK f (Sub a fs)) (f t),
@@ -193,6 +259,7 @@ instance
     Typeable t
   ) => DistSubHK (fn ': fns) Identity (HK f (Sub a fs)) where
   distSubHK _ trmap hk = distSubHK (Proxy @fns) (TRMap.insert (Identity $ Field @fn (getField @fn hk)) trmap) hk
+  {-# INLINE distSubHK #-}
 
 -- TODO: check f in fs
 instance (HasField fn t a, KnownSymbol fn, Typeable a, Functor f) => HasField (fn :: Symbol) (HK f t) (f a) where
@@ -240,18 +307,22 @@ class ToHK t where
 
 instance {-# OVERLAPPING #-} ToHK (Sub t fs) where
   toHK' (Sub tmap) = HK $ runIdentity $ TRMap.hoistA (\ix -> fmap pure ix) tmap
+  {-# INLINE toHK' #-}
 
 instance {-# OVERLAPPABLE #-} (GToHK t (GenFields t (Rep t))) => ToHK t where
   toHK' = gToHK (Proxy @(GenFields t (Rep t))) (HK TRMap.empty)
+  {-# INLINE toHK' #-}
 
-class GToHK t (fcs :: [Constraint]) where
+class GToHK t (fcs :: [RecFieldK]) where
   gToHK :: Applicative f => Proxy fcs -> HK f t -> t -> HK f t
 
 instance GToHK t '[] where
   gToHK _ hkt _ = hkt
+  {-# INLINE gToHK #-}
 
-instance (HasField f r a, r ~ t, GToHK t fcs, KnownSymbol f, Typeable a) => GToHK t (HasField (f :: Symbol) r a ': fcs) where
+instance (HasField f r a, r ~ t, GToHK t fcs, KnownSymbol f, Typeable a) => GToHK t (HasField (f :: Symbol) r ': fcs) where
   gToHK _ (HK tmap) r = gToHK (Proxy @fcs) (HK $ TRMap.insert (pure (Field @f $ getField @f @r r)) tmap) r
+  {-# INLINE gToHK #-}
 
 class FromHK (t :: Type) where
   fromHK' :: Applicative f => HK f t -> f t
@@ -286,23 +357,25 @@ instance (KnownSymbol fn, Typeable a) => GFromHK t (S1 ('MetaSel ('Just fn) _1 _
 instance TypeError ('Text "The constructor " ':<>: 'ShowType t ':<>: 'Text " does not have named fields") => GFromHK t (S1 ('MetaSel 'Nothing _1 _2 _3) k1) where
   gFromHK = error "Panic: Unreachable code"
 
-{-
-type family TypeFields (t :: Type) :: [Constraint] where
---  TypeFields (Sub t fs) = SubFields t fs
-  TypeFields t = GenFields t
 
-type family SubFields (t :: Type) (fs :: [Symbol]) :: [Type] where
+type family TypeFields (t :: Type) :: [RecFieldK] where
+  TypeFields (Sub t fs) = SubFields t fs
+  TypeFields t = GenFields t (Rep t)
+
+type family SubFields (t :: Type) (fs :: [Symbol]) :: [RecFieldK] where
   SubFields _ '[] = '[]
-  SubFields t '(f ': fs) = Field f t ': SubFields t fs
--}
+  SubFields t (f ': fs) = RecField f t ': SubFields t fs
 
-type family GenFields (t :: Type) (rep :: Type -> Type) :: [Constraint] where
+type family GenFields (t :: Type) (rep :: Type -> Type) :: [RecFieldK] where
   GenFields t (D1 i f)  = GenFields t f
   GenFields t (f :+: g) = TypeError ('Text "Record does not support sum type: " :<>: 'ShowType t)
   GenFields t (C1 ('MetaCons cn _ 'False) _) = TypeError ('Text "The constructor " ':<>: 'ShowType cn ':<>: 'Text " does not have named fields")
   GenFields t (C1 i c) = GenFields t c
   GenFields t (f :*: g) = GenFields t f :++ GenFields t g
-  GenFields t (S1 ('MetaSel ('Just sn) _ _ _) (K1 i ft)) = '[HasField sn t ft]
+  GenFields t (S1 ('MetaSel ('Just sn) _ _ _) (K1 i _ft)) = '[HasField sn t]
+
+type family ValidateExt (t :: Type) (fs :: [(Symbol, Type)]) :: Constraint where
+  ValidateExt _ _ = () -- TODO:
 
 -- | An anonymous record
 newtype Rec (xs :: [(Symbol, Type)]) = Rec TMap
