@@ -38,6 +38,17 @@ module Record
   , toRec
   , rec_
   , consRec
+  , FldsTagRec (..)
+  , FldsTag (..)
+  , Field (..)
+
+  -- TODO: Analysis
+  , DistSubHK
+  , GenFields
+  , GenFieldsSym
+  , Project
+  -- TODO: Remove
+  , HK(HK)
   ) where
 
 import Control.Applicative (empty, Alternative)
