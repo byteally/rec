@@ -26,13 +26,16 @@ module Record
   , sub_
   , consSub
   , joinSub
+  , subToListWith
   , toType
   , toHK
   , fromHK
   , emptyHK
   , pointedHK
+  , constructHK
   , hoistHK
   , hoistHKA
+  , hkToListWith
   , toHKOfSub
   , toSubOfHK
   , toRec
@@ -47,6 +50,9 @@ module Record
   , GenFields
   , GenFieldsSym
   , Project
+  , GEmptyHK
+  , GConstructHK
+  , TypeFields
   -- TODO: Remove
   , HK(HK)
   ) where
@@ -174,7 +180,7 @@ instance GFrom t hk f => GFrom t hk (C1 c f) where
 instance (GFrom t hk f, GFrom t hk g) => GFrom t hk (f :*: g) where
   gFrom hk = gFrom hk :*: gFrom hk
 
-instance (hk ~ hk', HasField fn t a, KnownSymbol fn, Typeable a, Functor hk') => GFrom t hk (S1 ('MetaSel ('Just fn) _1 _2 _3) (K1 k (hk' a))) where
+instance (hk ~ hk', HasField fn t a, KnownSymbol fn, Typeable a, Coercible (hk' (Field fn a)) (hk' a)) => GFrom t hk (S1 ('MetaSel ('Just fn) _1 _2 _3) (K1 k (hk' a))) where
   gFrom hk = M1 $ K1 $ getField @fn hk
 
 instance TypeError ('Text "Panic @GTo! The constructor does not have named fields") => GFrom t hk (S1 ('MetaSel 'Nothing _1 _2 _3) k1) where
@@ -203,6 +209,9 @@ toSubOfHK = Sub . distSubHK (Proxy @fs) TRMap.empty
 joinSub :: Sub (Sub t fs1) fs -> Sub t fs
 joinSub = coerce
 
+subToListWith :: forall r t fs. (forall a. Typeable a => a -> r) -> Sub t fs -> [r]
+subToListWith f (Sub tmap) = TMap.toListWith f tmap
+
 toHK :: forall f t.(Applicative f, ToHK t) => t -> HK f t
 toHK = toHK'
 {-# INLINE toHK #-}
@@ -219,6 +228,9 @@ hoistHKA :: forall f g m t.Applicative m =>(forall a.f a -> m (g a)) -> HK f t -
 hoistHKA f (HK trmap) = HK <$> TRMap.hoistA f trmap
 {-# INLINE hoistHKA #-}
 
+hkToListWith :: forall r f t. (forall a. Typeable a => f a -> r) -> HK f t -> [r]
+hkToListWith f (HK trmap) = TRMap.toListWith f trmap
+
 pointedHK :: forall f t.GEmptyHK t (TypeFields t) => (forall a. f a) -> HK f t
 pointedHK pointf = HK $ gEmptyHK (Proxy @'(TypeFields t, t)) pointf
 {-# INLINE pointedHK #-}
@@ -226,6 +238,10 @@ pointedHK pointf = HK $ gEmptyHK (Proxy @'(TypeFields t, t)) pointf
 emptyHK :: forall f t.(Alternative f, GEmptyHK t (TypeFields t)) => HK f t
 emptyHK = HK $ gEmptyHK (Proxy @'(TypeFields t, t)) empty
 {-# INLINE emptyHK #-}
+
+constructHK :: forall c f t.GConstructHK t c (TypeFields t) => (forall (fn :: Symbol) a. c fn a => Proxy '(fn, a) -> f (Field fn a)) -> HK f t
+constructHK ctor = HK $ gConstructHK (Proxy @'(TypeFields t, t, c)) ctor
+{-# INLINE constructHK #-}
 
 class GEmptyHK t (fcs :: [RecFieldK]) where
   gEmptyHK :: Proxy '(fcs, t) -> (forall a. f a) -> TypeRepMap f
@@ -235,10 +251,22 @@ instance GEmptyHK t '[] where
   {-# INLINE gEmptyHK #-}
 
 instance (HasField f r a, GEmptyHK t fcs, KnownSymbol f, Typeable a) => GEmptyHK t (HasField (f :: Symbol) r ': fcs) where
-  gEmptyHK _ pointf = TRMap.insert (pointf @a) $ gEmptyHK (Proxy @'(fcs, t)) pointf
+  gEmptyHK _ pointf = TRMap.insert (pointf @(Field f a)) $ gEmptyHK (Proxy @'(fcs, t)) pointf
   {-# INLINE gEmptyHK #-}
 
+class GConstructHK t (c :: Symbol -> Type -> Constraint) (fcs :: [RecFieldK]) where
+  gConstructHK :: Proxy '(fcs, t, c) -> (forall fn a. c fn a => Proxy '(fn, a) -> f (Field fn a)) -> TypeRepMap f
+
+instance GConstructHK t c '[] where
+  gConstructHK _ _ = TRMap.empty
+  {-# INLINE gConstructHK #-}
+
+instance (HasField f r a, GConstructHK t c fcs, KnownSymbol f, Typeable a, c f a) => GConstructHK t c (HasField (f :: Symbol) r ': fcs) where
+  gConstructHK _ ctor = TRMap.insert (ctor @f @a Proxy) $ gConstructHK (Proxy @'(fcs, t, c)) ctor
+  {-# INLINE gConstructHK #-}  
+
 newtype Field (s :: Symbol) t = Field { unField :: t }
+newtype HKField (f :: Type -> Type) (s :: Symbol) t = HKField { unHKField :: f t }
 
 type RecFieldK = Type -> Constraint
 type RecField (s :: Symbol) t = HasField s t
@@ -273,10 +301,10 @@ instance
   {-# INLINE distSubHK #-}
 
 -- TODO: check f in fs
-instance (HasField fn t a, KnownSymbol fn, Typeable a, Functor f) => HasField (fn :: Symbol) (HK f t) (f a) where
+instance (HasField fn t a, KnownSymbol fn, Typeable a, Coercible (f (Field fn a)) (f a)) => HasField (fn :: Symbol) (HK f t) (f a) where
   getField (HK trmap) = case TRMap.lookup @(Field fn a) trmap of
-    Just a -> unField <$> a
-    Nothing -> error $ "Panic: Impossible: Field not found: " ++ (symbolVal (Proxy @fn))
+    Just a -> (coerce :: f (Field fn a) -> f a) a
+    Nothing -> error $ "Panic: Impossible: Field not found: " ++ (symbolVal (Proxy @fn)) ++ " " ++ (show $ TRMap.toListWith (show . typeRep) trmap)
 
 class Project t (xs :: [Symbol]) where
   prj :: t -> Sub t xs
