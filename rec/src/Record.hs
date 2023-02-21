@@ -16,11 +16,13 @@
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE OverloadedLabels #-}
 module Record
   ( Sub
   , Sup
   , HK
   , Rec
+  , HRec
   , Corec
   , project
   , sub_
@@ -39,11 +41,17 @@ module Record
   , toHKOfSub
   , toSubOfHK
   , toRec
-  , rec_
-  , consRec
+  , recToListWith
+  , hrecToListWith
+  , val
   , FldsTagRec (..)
   , FldsTag (..)
   , Field (..)
+  , (.&)
+  , (.=)
+  , end
+  , AnonRec (..)
+  , Label
 
   -- TODO: Analysis
   , DistSubHK
@@ -71,6 +79,7 @@ import Data.Typeable
 import GHC.Generics
 import Record.Internal
 import Data.Functor.Identity
+import Data.Functor.Const (Const(..))
 
 
 newtype Sub t (xs :: [Symbol]) = Sub TMap
@@ -265,7 +274,6 @@ instance (HasField f r a, GConstructHK t c fcs, KnownSymbol f, Typeable a, c f a
   gConstructHK _ ctor = TRMap.insert (ctor @f @a Proxy) $ gConstructHK (Proxy @'(fcs, t, c)) ctor
   {-# INLINE gConstructHK #-}  
 
-newtype Field (s :: Symbol) t = Field { unField :: t }
 newtype HKField (f :: Type -> Type) (s :: Symbol) t = HKField { unHKField :: f t }
 
 type RecFieldK = Type -> Constraint
@@ -419,12 +427,19 @@ type family ValidateExt (t :: Type) (fs :: [(Symbol, Type)]) :: Constraint where
 -- | An anonymous record
 newtype Rec (xs :: [(Symbol, Type)]) = Rec TMap
 
+newtype HRec (f :: Type -> Type) (xs :: [(Symbol, Type)]) = HRec (TypeRepMap f)
+
 newtype FldsTagRec (xs :: [(Symbol, Type)]) a = FldsTagRec a
 
 instance (a ~ LookupType f xs, KnownSymbol f, Typeable a) => HasField (f :: Symbol) (Rec xs) a where
   getField (Rec tmap) = case unField <$> TMap.lookup @(Field f a) tmap of
     Just a -> a
     Nothing -> error $ "Panic: Impossible: Field not found: " ++ (symbolVal (Proxy @f))
+
+instance (a ~ LookupType fn xs, KnownSymbol fn, Typeable a, Coercible (f (Field fn a)) (f a)) => HasField (fn :: Symbol) (HRec f xs) (f a) where
+  getField (HRec trmap) = case TRMap.lookup @(Field fn a) trmap of
+    Just a -> (coerce :: f (Field fn a) -> f a) a
+    Nothing -> error $ "Panic: Impossible: Field not found: " ++ (symbolVal (Proxy @fn)) ++ " " ++ (show $ TRMap.toListWith (show . typeRep) trmap)    
 
 type family LookupType (s :: Symbol) (xs :: [(Symbol, Type)]) :: Type where
   LookupType fld ( '(fld, t) ': ts) = t
@@ -446,14 +461,63 @@ instance ( HasField f t a
   {-# INLINE toRec #-}
   toRec r = Rec $ TMap.insert (Field @f $ getField @f @t r) $ coerce $ toRec @t @fs r
 
+recToListWith :: forall r t fs. (forall a. Typeable a => a -> r) -> Rec fs -> [r]
+recToListWith f (Rec tmap) = TMap.toListWith f tmap
+
+hrecToListWith :: forall r f fs. (forall a. Typeable a => f a -> r) -> HRec f fs -> [r]
+hrecToListWith f (HRec trmap) = TRMap.toListWith f trmap
+
 {-# INLINE rec_ #-}
 rec_ :: Rec '[]
 rec_ = Rec TMap.empty
 
 -- TODO: Duplicate fields?
-{-# INLINE consRec #-}
-consRec :: forall fld a xs. (KnownSymbol fld, Typeable a) => a -> Rec xs -> Rec ( '(fld, a) ': xs )
-consRec a (Rec tmap) = Rec (TMap.insert (Field @fld a) tmap)
+{-# INLINE consRec_ #-}
+consRec_ :: forall fld a xs. (KnownSymbol fld, Typeable a) => a -> Rec xs -> Rec ( '(fld, a) ': xs )
+consRec_ a (Rec tmap) = Rec (TMap.insert (Field @fld a) tmap)
+
+{-# INLINE unconsRec_ #-}
+unconsRec_ :: forall fld a xs. (KnownSymbol fld, Typeable a) => Rec ( '(fld, a) ': xs ) -> (a, Rec xs)
+unconsRec_ r@(Rec tmap) = (getField @fld r,Rec $ TMap.delete @(Field fld a) tmap)
+
+{-# INLINE consHRec_ #-}
+consHRec_ :: forall fld a f xs. (KnownSymbol fld, Typeable a, Coercible (f a) (f (Field fld a))) => f a -> HRec f xs -> HRec f ( '(fld, a) ': xs )
+consHRec_ fa (HRec trmap) = HRec (TRMap.insert ((coerce :: f a -> f (Field fld a)) fa) trmap)
+
+{-# INLINE unconsHRec_ #-}
+unconsHRec_ :: forall fld a f xs. (KnownSymbol fld, Typeable a, Coercible (f (Field fld a)) (f a)) => HRec f ( '(fld, a) ': xs ) -> (f a, HRec f xs)
+unconsHRec_ r@(HRec tmap) = (getField @fld r,HRec $ TRMap.delete @(Field fld a) tmap)
+
+--type RecFieldCxt :: Symbol -> Type -> Constraint
+type RecFieldCxt fn v = KnownSymbol fn
+--class Foo :: Symbol -> Type -> Constraint
+
+instance AnonRec Rec where
+  type FieldKind Rec = '(,)
+  type FieldNameConstraint Rec = KnownSymbol
+  type FieldTypeConstraint Rec = Typeable
+  endRec = rec_
+  {-# INLINE endRec #-}
+  consRec (Field v) r = consRec_ v r
+  {-# INLINE consRec #-}
+  unconsRec r = let (v, r') = unconsRec_ r in (Field v, r')
+  {-# INLINE unconsRec #-}
+
+instance AnonRec (HRec f) where
+  type FieldKind (HRec f) = '(,)
+  type IsHKRec (HRec f) = 'Just f
+  type FieldNameConstraint (HRec f) = KnownSymbol
+  type FieldConstraint (HRec f) = HRecFieldConstraint f
+  endRec = HRec TRMap.empty
+  {-# INLINE endRec #-}
+  consRec (Field v) r =  consHRec_ v r
+  {-# INLINE consRec #-}
+  unconsRec r = let (v, r') = unconsHRec_ r in (Field v, r')
+  {-# INLINE unconsRec #-}
+
+class (Coercible (f (RecMemberType fn ('Just f) ty)) (f (Field fn (RecMemberType fn ('Just f) ty))), Typeable (RecMemberType fn ('Just f) ty)) => HRecFieldConstraint (f :: Type -> Type) (fn :: Symbol) (ty :: Type)
+instance (Coercible (f (RecMemberType fn ('Just f) ty)) (f (Field fn (RecMemberType fn ('Just f) ty))), Typeable (RecMemberType fn ('Just f) ty)) => HRecFieldConstraint f fn ty
+
 
 deriving via FldsTagRec xs (Rec xs) instance (Eq (FldsTagRec xs (Rec xs))) => Eq (Rec xs)
 deriving via FldsTagRec xs (Rec xs) instance (Ord (FldsTagRec xs (Rec xs))) => Ord (Rec xs)
@@ -480,11 +544,15 @@ instance ( Ord a,
          ) => Ord (FldsTagRec ( '(fn, a) ': xs) (Rec xs0)) where
   FldsTagRec s1 `compare` FldsTagRec s2 = (getField @fn s1 `compare` getField @fn s2) `compare` (FldsTagRec @xs s1 `compare` FldsTagRec @xs s2)
 
-sample =
-  consRec @"fld1" True    $
-  consRec @"fld2" "False" $
-  consRec @"fld3" (Just True) $
-  rec_
+{-
+--sample :: Char
+sample = #f1 .= True
+         .& #f2 .= show 'a'
+         .& end @Rec -- #f2 := 'a' :& (End @Rec)
+testMatch = case sample of
+  _ := b :& _ := s :& End -> True
+-}
 
 -- | An anonymous sum
 newtype Corec (xs :: [(Symbol, Type)]) = Corec TMap
+
