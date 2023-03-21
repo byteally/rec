@@ -17,6 +17,7 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE OverloadedLabels #-}
+{-# LANGUAGE UndecidableSuperClasses #-}
 module Record
   ( Sub
   , Sup
@@ -36,6 +37,7 @@ module Record
   , pointedHK
   , constructHK
   , hoistHK
+  , hoistWithKeyHK
   , hoistHKA
   , hkToListWith
   , toHKOfSub
@@ -43,7 +45,12 @@ module Record
   , toRec
   , recToListWith
   , hrecToListWith
+  , hrecToHKOfRec
+  , fromHKOfRec
+  , fromHRec
   , val
+  , ValidateRecToType
+  , GGetFields
   , FldsTagRec (..)
   , FldsTag (..)
   , Field (..)
@@ -71,6 +78,7 @@ import GHC.TypeLits
 import Data.Kind
 import qualified GHC.Records.Compat as R
 import Data.Coerce
+import Data.Type.Equality
 import Data.TypeRepMap (TypeRepMap)
 import Data.TMap (TMap)
 import qualified Data.TMap as TMap
@@ -89,6 +97,24 @@ data Sup t (xs :: [(Symbol, Type)]) = Sup !t !(Rec xs)
 instance HasField f t a => HasField f (Sup t '[]) a where
   getField (Sup t _) = getField @f t
   {-# INLINE getField #-}
+
+instance HasField f t a => HasField '(b :: Bool, f :: Symbol) (Sup t '[]) a where
+  getField (Sup t _) = getField @f t
+  {-# INLINE getField #-}  
+
+instance HasField '( 'False, f) (Sup t xs) a => HasField f (Sup t xs) a where
+  getField sup = getField @'( 'False, f) sup
+  {-# INLINE getField #-}
+
+instance (f ~ fn, KnownSymbol fn, Typeable a) => HasField '( 'True, f) (Sup t ('(fn, a) ': xs)) a where
+  getField (Sup _ (Rec tmap)) = case unField <$> TMap.lookup @(Field f a) tmap of
+    Just a -> a
+    Nothing -> error $ "Panic: Impossible: Field not found: " ++ (symbolVal (Proxy @f))
+  {-# INLINE getField #-}
+
+instance (KnownSymbol f, Typeable a, HasField '(f==fn, f) (Sup t ('(fn, t) ': xs)) a) => HasField '( 'False, f) (Sup t (x ': '(fn, t) ': xs)) a where
+  getField (Sup t (Rec tmap)) = getField @'(f == fn, f) $ Sup t $ Rec @('(fn, t) ': xs) $ TMap.delete @(Field f a) tmap
+  {-# INLINE getField #-}  
 
 deriving via FldsTag xs (Sub t xs) instance (Eq (FldsTag xs (Sub t xs))) => Eq (Sub t xs)
 deriving via FldsTag xs (Sub t xs) instance (Ord (FldsTag xs (Sub t xs))) => Ord (Sub t xs)
@@ -232,6 +258,10 @@ fromHK = fromHK'
 hoistHK :: forall f g t.(forall a.f a -> g a) -> HK f t -> HK g t
 hoistHK f (HK trmap) = HK $ TRMap.hoist f trmap
 {-# INLINE hoistHK #-}
+
+hoistWithKeyHK :: forall f g t.(forall a.Typeable a => f a -> g a) -> HK f t -> HK g t
+hoistWithKeyHK f (HK trmap) = HK $ TRMap.hoistWithKey f trmap
+{-# INLINE hoistWithKeyHK #-}
 
 hoistHKA :: forall f g m t.Applicative m =>(forall a.f a -> m (g a)) -> HK f t -> m (HK g t)
 hoistHKA f (HK trmap) = HK <$> TRMap.hoistA f trmap
@@ -421,6 +451,14 @@ type family GenFields (t :: Type) (rep :: Type -> Type) :: [RecFieldK] where
   GenFields t (f :*: g) = GenFields t f :++ GenFields t g
   GenFields t (S1 ('MetaSel ('Just sn) _ _ _) (K1 i _ft)) = '[HasField sn t]
 
+type family GGetFields (t :: Type) (rep :: Type -> Type) :: [(Symbol, Type)] where
+  GGetFields t (D1 i f)  = GGetFields t f
+  GGetFields t (f :+: g) = TypeError ('Text "Record does not support sum type: " :<>: 'ShowType t)
+  GGetFields t (C1 ('MetaCons cn _ 'False) _) = TypeError ('Text "The constructor " ':<>: 'ShowType cn ':<>: 'Text " does not have named fields")
+  GGetFields t (C1 i c) = GGetFields t c
+  GGetFields t (f :*: g) = GGetFields t f :++ GGetFields t g
+  GGetFields t (S1 ('MetaSel ('Just sn) _ _ _) (K1 i ft)) = '[ '(sn, ft)]
+  
 type family ValidateExt (t :: Type) (fs :: [(Symbol, Type)]) :: Constraint where
   ValidateExt _ _ = () -- TODO:
 
@@ -428,6 +466,69 @@ type family ValidateExt (t :: Type) (fs :: [(Symbol, Type)]) :: Constraint where
 newtype Rec (xs :: [(Symbol, Type)]) = Rec TMap
 
 newtype HRec (f :: Type -> Type) (xs :: [(Symbol, Type)]) = HRec (TypeRepMap f)
+
+hrecToHKOfRec :: HRec f xs -> HK f (Rec xs)
+hrecToHKOfRec = coerce
+
+-- Check compatability
+fromHKOfRec :: ValidateRecToType xs t => HK f (Rec xs) -> HK f t
+fromHKOfRec = coerce
+
+fromHRec :: ValidateRecToType xs t => HRec f xs -> HK f t
+fromHRec = fromHKOfRec . hrecToHKOfRec
+{-# INLINE fromHRec #-}
+
+class (ChkRecCompat t (ChkRecCompat' t (Rep t) '(() :: Constraint, xs))) => ValidateRecToType (xs :: [(Symbol, Type)]) (t :: Type)
+
+instance (ChkRecCompat t (ChkRecCompat' t (Rep t) '(() :: Constraint, xs))) => ValidateRecToType xs t
+
+type family ChkRecCompat (t :: Type) (res :: (Constraint, [(Symbol, Type)])) :: Constraint where
+  ChkRecCompat _ '(cxt, '[]) = cxt
+  ChkRecCompat t '(cxt, ('(fn, ft) ': xs)) = (TypeError ('Text "Extraneous field"), ChkRecCompat t '(cxt, xs))
+  
+type family ChkRecCompat' (t :: Type) (rep :: Type -> Type) (acc :: (Constraint, [(Symbol, Type)])) :: (Constraint, [(Symbol, Type)]) where
+  ChkRecCompat' t (D1 i f) acc = ChkRecCompat' t f acc
+  ChkRecCompat' t (f :+: g) _ = TypeError ('Text "Record does not support sum type: " :<>: 'ShowType t)
+  ChkRecCompat' t (C1 ('MetaCons cn _ 'False) _) _ = TypeError ('Text "The constructor " ':<>: 'ShowType cn ':<>: 'Text " does not have named fields")
+  ChkRecCompat' t (C1 i c) acc = ChkRecCompat' t c acc
+  ChkRecCompat' t (f :*: g) acc = ChkRecCompat' t g (ChkRecCompat' t f acc)
+  ChkRecCompat' t (S1 ('MetaSel ('Just sn) _ _ _) (K1 i ft)) '(cxt, xs) = DoesFieldMatches t sn ft xs (LookupField t sn xs) cxt
+
+type family LookupField (t :: Type) (fn :: Symbol) (fs :: [(Symbol, Type)]) :: [(Symbol, Type)] where
+  LookupField t fn ('(fn, _) ': fs) = fs
+  LookupField t fn (n ': fs) = n ': LookupField t fn fs
+  LookupField t fn '[] = '[]
+
+type family DoesFieldMatches (t :: Type) (fn :: Symbol) (ft :: Type) (prevFlds ::[(Symbol, Type)]) (newFlds :: [(Symbol, Type)]) (accCxt :: Constraint) :: (Constraint, [(Symbol, Type)]) where
+  DoesFieldMatches t fn ft fs fs acc = '((acc, TypeError ('Text "Field not found " :<>: 'ShowType fn ':<>: 'Text "in type " ':<>: 'ShowType t)), fs)
+  DoesFieldMatches _ _ _ pfs nfs acc = '(acc, nfs)
+
+
+{-
+data SupHK (f :: Type -> Type) (t :: Type) (xs :: [(Symbol, Type)]) = SupHK !(HK f t) !(HRec f xs)
+
+instance HasField f t a => HasField f (SupHK f t '[]) a where
+  getField (SupHK t _) = getField @f t
+  {-# INLINE getField #-}
+
+instance HasField f t a => HasField '(b :: Bool, f :: Symbol) (SupHK f t '[]) a where
+  getField (SupHK t _) = getField @f t
+  {-# INLINE getField #-}  
+
+instance HasField '( 'False, f) (SupHK f t xs) a => HasField f (SupHK f t xs) a where
+  getField sup = getField @'( 'False, f) sup
+  {-# INLINE getField #-}
+
+instance (f ~ fn, KnownSymbol fn, Typeable a) => HasField '( 'True, f) (SupHK f t ('(fn, a) ': xs)) a where
+  getField (SupHK _ (Rec tmap)) = case unField <$> TMap.lookup @(Field f a) tmap of
+    Just a -> a
+    Nothing -> error $ "Panic: Impossible: Field not found: " ++ (symbolVal (Proxy @f))
+  {-# INLINE getField #-}
+
+instance (KnownSymbol f, Typeable a, HasField '(f==fn, f) (SupHK f t ('(fn, t) ': xs)) a) => HasField '( 'False, f) (SupHK f t (x ': '(fn, t) ': xs)) a where
+  getField (SupHK t (Rec tmap)) = getField @'(f == fn, f) $ SupHK t $ Rec @('(fn, t) ': xs) $ TMap.delete @(Field f a) tmap
+  {-# INLINE getField #-}
+-}
 
 newtype FldsTagRec (xs :: [(Symbol, Type)]) a = FldsTagRec a
 
@@ -476,6 +577,7 @@ rec_ = Rec TMap.empty
 consRec_ :: forall fld a xs. (KnownSymbol fld, Typeable a) => a -> Rec xs -> Rec ( '(fld, a) ': xs )
 consRec_ a (Rec tmap) = Rec (TMap.insert (Field @fld a) tmap)
 
+-- TODO: Unneeded traversal due to getField usage
 {-# INLINE unconsRec_ #-}
 unconsRec_ :: forall fld a xs. (KnownSymbol fld, Typeable a) => Rec ( '(fld, a) ': xs ) -> (a, Rec xs)
 unconsRec_ r@(Rec tmap) = (getField @fld r,Rec $ TMap.delete @(Field fld a) tmap)
