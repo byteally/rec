@@ -1,14 +1,47 @@
-module Record.Setter where
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE StandaloneKindSignatures #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
+module Record.Setter
+  ( SetField (..)
+  , setField
+  ) where
 
--- https://gist.github.com/danidiaz/a945ff36ddccac0851fea2a4485df350
+import GHC.Generics
+import Data.Kind
+import GHC.TypeLits
+import GHC.Records
+import GHC.Exts
+import Data.Type.Equality
+
 
 -- something like this should exist with RecordDotSyntax
-class SetField (n :: Symbol) r v | n r -> v where
+type SetField :: forall {k} . k -> Type -> Type -> Constraint
+class SetField (n :: k) (r :: Type) (v :: Type) | n r -> v where
   modifyField :: (v -> v) -> r -> r
 
-instance (Generic r, GSetter n 'False (Rep r) v, HasField n r v) => SetField n r v where
-  modifyField fn r = to $ gSetter @n @'False fn (from r)
-  
+-- Argument is flipped (a -> r -> r) in the latest proposal
+-- https://github.com/adamgundry/ghc-proposals/blob/hasfield-redesign/proposals/0000-hasfield-redesign.rst
+setField :: forall {k} (x :: k) (r :: Type) (a :: Type).SetField x r a => r -> a -> r
+setField r v = modifyField @x (\_ -> v) r
+
+
+{-
+
+-- https://gist.github.com/danidiaz/a945ff36ddccac0851fea2a4485df350
 --
 -- some shared machinery
 newtype Setter a b = Setter ((b -> b) -> a)
@@ -43,18 +76,5 @@ instance GSetter actn 'False (K1 k act) exp where
 
 instance (act ~ exp) => GSetter n 'True (K1 R act) exp where
   gSetter fn (K1 val) = K1 (fn val)
-  
-data User = User
-  { name :: String
-  , age :: Int
-  , addr :: Addr
-  } deriving (Generic)
 
-data Addr = Addr
-  { city :: String
-  , pin :: Int
-  } deriving (Generic)
-
--- TODO: Error message horrible
-testusr = User "foo" 10 (Addr "ch" 42)
-testupd = getField @"city" (getField @"addr" (set testusr)) .= "bar"
+-}

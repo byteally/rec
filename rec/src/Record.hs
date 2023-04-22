@@ -465,14 +465,22 @@ type family ValidateExt (t :: Type) (fs :: [(Symbol, Type)]) :: Constraint where
 -- | An anonymous record
 newtype Rec (xs :: [(Symbol, Type)]) = Rec TMap
 
+instance Show (Rec '[]) where
+  show _ = ""
+
+instance (KnownSymbol fn, Show ft, Show (Rec xs), Typeable ft) => Show (Rec ('(fn,ft) ': xs)) where
+  show r = let (fval, rst) = unconsRec r in show (val fval) ++ show rst
+
 newtype HRec (f :: Type -> Type) (xs :: [(Symbol, Type)]) = HRec (TypeRepMap f)
 
 hrecToHKOfRec :: HRec f xs -> HK f (Rec xs)
 hrecToHKOfRec = coerce
+{-# INLINE hrecToHKOfRec #-}
 
 -- Check compatability
 fromHKOfRec :: ValidateRecToType xs t => HK f (Rec xs) -> HK f t
 fromHKOfRec = coerce
+{-# INLINE fromHKOfRec #-}
 
 fromHRec :: ValidateRecToType xs t => HRec f xs -> HK f t
 fromHRec = fromHKOfRec . hrecToHKOfRec
