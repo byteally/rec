@@ -40,6 +40,7 @@ module Record
   , hoistWithKeyHK
   , hoistHKA
   , hkToListWith
+  , hkToListWithKey
   , toHKOfSub
   , toSubOfHK
   , toRec
@@ -142,7 +143,7 @@ instance ( HasField fn t a, Ord a,
 instance Show t => Show (Sub t fs) where
   show sub = error "TODO"
 
-newtype HK (f :: Type -> Type) (t :: Type) = HK (TypeRepMap f)
+newtype HK (f :: Type -> Type) (t :: Type) = HK (TypeRepMap (HKField f))
 
 instance Show ( FldsTag (GenFieldsSym t (Rep t)) (HK f t)) => Show (HK f t) where
   show hk = show $ FldsTag @(GenFieldsSym t (Rep t)) hk
@@ -179,7 +180,7 @@ type family HKRep (t :: Type) (hk :: Type -> Type) (rep :: Type -> Type) :: Type
   HKRep t hk (S1 c f) = S1 c (HKRep t hk f)
   HKRep t hk (K1 i a) = K1 i (hk a)
 
-instance (Generic t, GTo f (HKRep t f (Rep t)), Rep (HK f t) ~ HKRep t f (Rep t), GFrom t f (HKRep t f (Rep t))) => Generic (HK f t) where
+instance (Generic t, GTo (HKField f) (HKRep t f (Rep t)), Rep (HK f t) ~ HKRep t f (Rep t), GFrom t f (HKRep t f (Rep t))) => Generic (HK f t) where
   type Rep (HK f t) = HKRep t f (Rep t)
   to r = HK $ gTo r TRMap.empty
   from hk = gFrom hk
@@ -226,15 +227,15 @@ project = prj
 {-# INLINE project #-}
 
 toType :: forall r t fs.FromHK r => Sub t fs -> r
-toType (Sub tmap) = runIdentity $ fromHK $ HK tmap
+toType (Sub tmap) = undefined --runIdentity $ fromHK $ HK tmap
 {-# INLINE toType #-}
 
 extend :: ValidateExt t xs => t -> Rec xs -> Sup t xs
 extend t r = Sup t r
 {-# INLINE extend #-}
 
-toHKOfSub :: forall fs f a.(DistSubHK fs f (Sub (HK f a) fs), Applicative f) => Sub (HK f a) fs -> HK f (Sub a fs)
-toHKOfSub = HK . distSubHK (Proxy @fs) TRMap.empty
+toHKOfSub :: forall fs f a.(DistSubHK fs (HKField f) (Sub (HK f a) fs), Applicative f) => Sub (HK f a) fs -> HK f (Sub a fs)
+toHKOfSub = undefined -- HK . distSubHK (Proxy @fs) TRMap.empty
 {-# INLINE toHKOfSub #-}
 
 toSubOfHK :: forall fs f a.(DistSubHK fs Identity (HK f (Sub a fs)), Applicative f) => HK f (Sub a fs) -> Sub (HK f a) fs
@@ -256,19 +257,25 @@ fromHK = fromHK'
 {-# INLINE fromHK #-}
 
 hoistHK :: forall f g t.(forall a.f a -> g a) -> HK f t -> HK g t
-hoistHK f (HK trmap) = HK $ TRMap.hoist f trmap
+hoistHK f (HK trmap) = HK $ TRMap.hoist (\(HKField fa) -> HKField (f fa)) trmap
 {-# INLINE hoistHK #-}
 
 hoistWithKeyHK :: forall f g t.(forall a.Typeable a => f a -> g a) -> HK f t -> HK g t
-hoistWithKeyHK f (HK trmap) = HK $ TRMap.hoistWithKey f trmap
+hoistWithKeyHK f (HK trmap) = HK $ TRMap.hoistWithKey (\(HKField fa) -> HKField (f fa)) trmap
 {-# INLINE hoistWithKeyHK #-}
 
 hoistHKA :: forall f g m t.Applicative m =>(forall a.f a -> m (g a)) -> HK f t -> m (HK g t)
-hoistHKA f (HK trmap) = HK <$> TRMap.hoistA f trmap
+hoistHKA f (HK trmap) = HK <$> TRMap.hoistA (\(HKField fa) -> HKField <$> (f fa)) trmap
 {-# INLINE hoistHKA #-}
 
 hkToListWith :: forall r f t. (forall a. Typeable a => f a -> r) -> HK f t -> [r]
-hkToListWith f (HK trmap) = TRMap.toListWith f trmap
+hkToListWith f (HK trmap) = TRMap.toListWith (\(HKField fa) -> f fa) trmap
+
+hkToListWithKey :: forall r f t. (forall a. Typeable a => SomeSymbol -> f a -> r) -> HK f t -> [r]
+hkToListWithKey f (HK trmap) = TRMap.toListWith (\hkf@(HKField fa) -> f (getFldSym hkf) fa) trmap
+  where
+    getFldSym :: forall fn x.(KnownSymbol fn) => HKField f (Field fn x) -> SomeSymbol
+    getFldSym _ = SomeSymbol (Proxy @fn)
 
 pointedHK :: forall f t.GEmptyHK t (TypeFields t) => (forall a. f a) -> HK f t
 pointedHK pointf = HK $ gEmptyHK (Proxy @'(TypeFields t, t)) pointf
@@ -278,33 +285,38 @@ emptyHK :: forall f t.(Alternative f, GEmptyHK t (TypeFields t)) => HK f t
 emptyHK = HK $ gEmptyHK (Proxy @'(TypeFields t, t)) empty
 {-# INLINE emptyHK #-}
 
-constructHK :: forall c f t.GConstructHK t c (TypeFields t) => (forall (fn :: Symbol) a. c fn a => Proxy '(fn, a) -> f (Field fn a)) -> HK f t
+constructHK :: forall c f t.GConstructHK t c (TypeFields t) => (forall (fn :: Symbol) a. c fn a => Proxy '(fn, a) -> f a) -> HK f t
 constructHK ctor = HK $ gConstructHK (Proxy @'(TypeFields t, t, c)) ctor
 {-# INLINE constructHK #-}
 
 class GEmptyHK t (fcs :: [RecFieldK]) where
-  gEmptyHK :: Proxy '(fcs, t) -> (forall a. f a) -> TypeRepMap f
+  gEmptyHK :: Proxy '(fcs, t) -> (forall a. f a) -> TypeRepMap (HKField f)
 
 instance GEmptyHK t '[] where
   gEmptyHK _ _ = TRMap.empty
   {-# INLINE gEmptyHK #-}
 
 instance (HasField f r a, GEmptyHK t fcs, KnownSymbol f, Typeable a) => GEmptyHK t (HasField (f :: Symbol) r ': fcs) where
-  gEmptyHK _ pointf = TRMap.insert (pointf @(Field f a)) $ gEmptyHK (Proxy @'(fcs, t)) pointf
+  gEmptyHK _ pointf = TRMap.insert (mkHKField @f (pointf @a)) $ gEmptyHK (Proxy @'(fcs, t)) pointf
   {-# INLINE gEmptyHK #-}
 
 class GConstructHK t (c :: Symbol -> Type -> Constraint) (fcs :: [RecFieldK]) where
-  gConstructHK :: Proxy '(fcs, t, c) -> (forall fn a. c fn a => Proxy '(fn, a) -> f (Field fn a)) -> TypeRepMap f
+  gConstructHK :: Proxy '(fcs, t, c) -> (forall fn a. c fn a => Proxy '(fn, a) -> f a) -> TypeRepMap (HKField f)
 
 instance GConstructHK t c '[] where
   gConstructHK _ _ = TRMap.empty
   {-# INLINE gConstructHK #-}
 
 instance (HasField f r a, GConstructHK t c fcs, KnownSymbol f, Typeable a, c f a) => GConstructHK t c (HasField (f :: Symbol) r ': fcs) where
-  gConstructHK _ ctor = TRMap.insert (ctor @f @a Proxy) $ gConstructHK (Proxy @'(fcs, t, c)) ctor
+  gConstructHK _ ctor = TRMap.insert (mkHKField @f (ctor @f @a Proxy)) $ gConstructHK (Proxy @'(fcs, t, c)) ctor
   {-# INLINE gConstructHK #-}  
 
-newtype HKField (f :: Type -> Type) (s :: Symbol) t = HKField { unHKField :: f t }
+data HKField (f :: Type -> Type) t where
+  HKField :: (KnownSymbol s, Typeable t) => { unHKField :: f t } -> HKField f (Field s t)
+
+mkHKField :: forall fn f t. (KnownSymbol fn, Typeable t) => f t -> HKField f (Field fn t)
+mkHKField = HKField
+{-# INLINE mkHKField #-}
 
 type RecFieldK = Type -> Constraint
 type RecField (s :: Symbol) t = HasField s t
@@ -339,9 +351,9 @@ instance
   {-# INLINE distSubHK #-}
 
 -- TODO: check f in fs
-instance (HasField fn t a, KnownSymbol fn, Typeable a, Coercible (f (Field fn a)) (f a)) => HasField (fn :: Symbol) (HK f t) (f a) where
+instance (HasField fn t a, KnownSymbol fn, Typeable a) => HasField (fn :: Symbol) (HK f t) (f a) where
   getField (HK trmap) = case TRMap.lookup @(Field fn a) trmap of
-    Just a -> (coerce :: f (Field fn a) -> f a) a
+    Just (HKField fa) -> fa
     Nothing -> error $ "Panic: Impossible: Field not found: " ++ (symbolVal (Proxy @fn)) ++ " " ++ (show $ TRMap.toListWith (show . typeRep) trmap)
 
 class Project t (xs :: [Symbol]) where
@@ -383,8 +395,11 @@ class ToHK t where
   toHK' :: Applicative f => t -> HK f t
 
 instance {-# OVERLAPPING #-} ToHK (Sub t fs) where
-  toHK' (Sub tmap) = HK $ runIdentity $ TRMap.hoistA (\ix -> fmap pure ix) tmap
+  toHK' (Sub tmap) = undefined --HK $ runIdentity $ TRMap.hoistA (\ix -> fmap pure ix) tmap
   {-# INLINE toHK' #-}
+
+instance {-# OVERLAPPING #-} ToHK () where
+  toHK' _ = HK TRMap.empty
 
 instance {-# OVERLAPPABLE #-} (GToHK t (GenFields t (Rep t))) => ToHK t where
   toHK' = gToHK (Proxy @(GenFields t (Rep t))) (HK TRMap.empty)
@@ -398,7 +413,7 @@ instance GToHK t '[] where
   {-# INLINE gToHK #-}
 
 instance (HasField f r a, r ~ t, GToHK t fcs, KnownSymbol f, Typeable a) => GToHK t (HasField (f :: Symbol) r ': fcs) where
-  gToHK _ (HK tmap) r = gToHK (Proxy @fcs) (HK $ TRMap.insert (pure (Field @f $ getField @f @r r)) tmap) r
+  gToHK _ (HK tmap) r = gToHK (Proxy @fcs) (HK $ TRMap.insert (mkHKField @f $ pure (getField @f @r r)) tmap) r
   {-# INLINE gToHK #-}
 
 class FromHK (t :: Type) where
@@ -408,7 +423,10 @@ instance {-# OVERLAPPABLE #-} (Generic t, GFromHK t (Rep t)) => FromHK t where
   fromHK' = fmap to . gFromHK (Proxy @(Rep t))
 
 instance {-# OVERLAPPING #-} FromHK (Sub t fs) where
-  fromHK' (HK hk) = Sub <$> TRMap.hoistA (\fa -> fmap Identity fa) hk
+  fromHK' (HK hk) = Sub <$> TRMap.hoistA (\(HKField fa) -> fmap (Identity . Field) fa) hk
+
+instance {-# OVERLAPPING #-} FromHK () where
+  fromHK' _ = pure ()
 
 class GFromHK (t :: Type) (trep :: Type -> Type) where
   gFromHK :: Applicative f => Proxy trep -> HK f t -> f (trep a)
@@ -428,7 +446,7 @@ instance (GFromHK t f, GFromHK t g) => GFromHK t (f :*: g) where
 
 instance (KnownSymbol fn, Typeable a) => GFromHK t (S1 ('MetaSel ('Just fn) _1 _2 _3) (K1 k a)) where
   gFromHK _ (HK trmap) = fmap (M1 . K1) $ case TRMap.lookup @(Field fn a) trmap of
-    Just a -> unField <$> a
+    Just (HKField a) -> a
     Nothing -> error $ "Panic: Impossible: Field not found: " ++ (symbolVal (Proxy @fn))
 
 instance TypeError ('Text "The constructor " ':<>: 'ShowType t ':<>: 'Text " does not have named fields") => GFromHK t (S1 ('MetaSel 'Nothing _1 _2 _3) k1) where
@@ -471,7 +489,7 @@ instance Show (Rec '[]) where
 instance (KnownSymbol fn, Show ft, Show (Rec xs), Typeable ft) => Show (Rec ('(fn,ft) ': xs)) where
   show r = let (fval, rst) = unconsRec r in show (val fval) ++ show rst
 
-newtype HRec (f :: Type -> Type) (xs :: [(Symbol, Type)]) = HRec (TypeRepMap f)
+newtype HRec (f :: Type -> Type) (xs :: [(Symbol, Type)]) = HRec (TypeRepMap (HKField f))
 
 hrecToHKOfRec :: HRec f xs -> HK f (Rec xs)
 hrecToHKOfRec = coerce
@@ -545,9 +563,9 @@ instance (a ~ LookupType f xs, KnownSymbol f, Typeable a) => HasField (f :: Symb
     Just a -> a
     Nothing -> error $ "Panic: Impossible: Field not found: " ++ (symbolVal (Proxy @f))
 
-instance (a ~ LookupType fn xs, KnownSymbol fn, Typeable a, Coercible (f (Field fn a)) (f a)) => HasField (fn :: Symbol) (HRec f xs) (f a) where
+instance (a ~ LookupType fn xs, KnownSymbol fn, Typeable a) => HasField (fn :: Symbol) (HRec f xs) (f a) where
   getField (HRec trmap) = case TRMap.lookup @(Field fn a) trmap of
-    Just a -> (coerce :: f (Field fn a) -> f a) a
+    Just (HKField fa) -> fa
     Nothing -> error $ "Panic: Impossible: Field not found: " ++ (symbolVal (Proxy @fn)) ++ " " ++ (show $ TRMap.toListWith (show . typeRep) trmap)    
 
 type family LookupType (s :: Symbol) (xs :: [(Symbol, Type)]) :: Type where
@@ -574,7 +592,7 @@ recToListWith :: forall r t fs. (forall a. Typeable a => a -> r) -> Rec fs -> [r
 recToListWith f (Rec tmap) = TMap.toListWith f tmap
 
 hrecToListWith :: forall r f fs. (forall a. Typeable a => f a -> r) -> HRec f fs -> [r]
-hrecToListWith f (HRec trmap) = TRMap.toListWith f trmap
+hrecToListWith f (HRec trmap) = TRMap.toListWith (\(HKField fa) -> f fa) trmap
 
 {-# INLINE rec_ #-}
 rec_ :: Rec '[]
@@ -591,11 +609,11 @@ unconsRec_ :: forall fld a xs. (KnownSymbol fld, Typeable a) => Rec ( '(fld, a) 
 unconsRec_ r@(Rec tmap) = (getField @fld r,Rec $ TMap.delete @(Field fld a) tmap)
 
 {-# INLINE consHRec_ #-}
-consHRec_ :: forall fld a f xs. (KnownSymbol fld, Typeable a, Coercible (f a) (f (Field fld a))) => f a -> HRec f xs -> HRec f ( '(fld, a) ': xs )
-consHRec_ fa (HRec trmap) = HRec (TRMap.insert ((coerce :: f a -> f (Field fld a)) fa) trmap)
+consHRec_ :: forall fld a f xs. (KnownSymbol fld, Typeable a) => f a -> HRec f xs -> HRec f ( '(fld, a) ': xs )
+consHRec_ fa (HRec trmap) = HRec (TRMap.insert (mkHKField @fld fa) trmap)
 
 {-# INLINE unconsHRec_ #-}
-unconsHRec_ :: forall fld a f xs. (KnownSymbol fld, Typeable a, Coercible (f (Field fld a)) (f a)) => HRec f ( '(fld, a) ': xs ) -> (f a, HRec f xs)
+unconsHRec_ :: forall fld a f xs. (KnownSymbol fld, Typeable a) => HRec f ( '(fld, a) ': xs ) -> (f a, HRec f xs)
 unconsHRec_ r@(HRec tmap) = (getField @fld r,HRec $ TRMap.delete @(Field fld a) tmap)
 
 --type RecFieldCxt :: Symbol -> Type -> Constraint
@@ -625,8 +643,8 @@ instance AnonRec (HRec f) where
   unconsRec r = let (v, r') = unconsHRec_ r in (Field v, r')
   {-# INLINE unconsRec #-}
 
-class (Coercible (f (RecMemberType fn ('Just f) ty)) (f (Field fn (RecMemberType fn ('Just f) ty))), Typeable (RecMemberType fn ('Just f) ty)) => HRecFieldConstraint (f :: Type -> Type) (fn :: Symbol) (ty :: Type)
-instance (Coercible (f (RecMemberType fn ('Just f) ty)) (f (Field fn (RecMemberType fn ('Just f) ty))), Typeable (RecMemberType fn ('Just f) ty)) => HRecFieldConstraint f fn ty
+class ({-Coercible (f (RecMemberType fn ('Just f) ty)) (f (Field fn (RecMemberType fn ('Just f) ty))), -}Typeable (RecMemberType fn ('Just f) ty)) => HRecFieldConstraint (f :: Type -> Type) (fn :: Symbol) (ty :: Type)
+instance ({-Coercible (f (RecMemberType fn ('Just f) ty)) (f (Field fn (RecMemberType fn ('Just f) ty))), -}Typeable (RecMemberType fn ('Just f) ty)) => HRecFieldConstraint f fn ty
 
 
 deriving via FldsTagRec xs (Rec xs) instance (Eq (FldsTagRec xs (Rec xs))) => Eq (Rec xs)
