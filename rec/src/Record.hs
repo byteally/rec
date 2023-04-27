@@ -21,7 +21,7 @@
 module Record
   ( Sub
   , Sup
-  , HK
+  , HK (HK) -- TODO: Remove Con Export
   , Rec
   , HRec
   , Corec
@@ -38,9 +38,10 @@ module Record
   , constructHK
   , hoistHK
   , hoistWithKeyHK
+  , hoistWithKeyAndTagHK
   , hoistHKA
   , hkToListWith
-  , hkToListWithKey
+  , hkToListWithTag
   , toHKOfSub
   , toSubOfHK
   , toRec
@@ -69,8 +70,6 @@ module Record
   , GEmptyHK
   , GConstructHK
   , TypeFields
-  -- TODO: Remove
-  , HK(HK)
   ) where
 
 import Control.Applicative (empty, Alternative)
@@ -264,6 +263,10 @@ hoistWithKeyHK :: forall f g t.(forall a.Typeable a => f a -> g a) -> HK f t -> 
 hoistWithKeyHK f (HK trmap) = HK $ TRMap.hoistWithKey (\(HKField fa) -> HKField (f fa)) trmap
 {-# INLINE hoistWithKeyHK #-}
 
+hoistWithKeyAndTagHK :: forall f g t.(forall a.Typeable a => SomeSymbol -> f a -> g a) -> HK f t -> HK g t
+hoistWithKeyAndTagHK f (HK trmap) = HK $ TRMap.hoistWithKey (\hkf@(HKField fa) -> HKField (f (getFldSym hkf) fa)) trmap
+{-# INLINE hoistWithKeyAndTagHK #-}
+
 hoistHKA :: forall f g m t.Applicative m =>(forall a.f a -> m (g a)) -> HK f t -> m (HK g t)
 hoistHKA f (HK trmap) = HK <$> TRMap.hoistA (\(HKField fa) -> HKField <$> (f fa)) trmap
 {-# INLINE hoistHKA #-}
@@ -271,11 +274,12 @@ hoistHKA f (HK trmap) = HK <$> TRMap.hoistA (\(HKField fa) -> HKField <$> (f fa)
 hkToListWith :: forall r f t. (forall a. Typeable a => f a -> r) -> HK f t -> [r]
 hkToListWith f (HK trmap) = TRMap.toListWith (\(HKField fa) -> f fa) trmap
 
-hkToListWithKey :: forall r f t. (forall a. Typeable a => SomeSymbol -> f a -> r) -> HK f t -> [r]
-hkToListWithKey f (HK trmap) = TRMap.toListWith (\hkf@(HKField fa) -> f (getFldSym hkf) fa) trmap
-  where
-    getFldSym :: forall fn x.(KnownSymbol fn) => HKField f (Field fn x) -> SomeSymbol
-    getFldSym _ = SomeSymbol (Proxy @fn)
+hkToListWithTag :: forall r f t. (forall a. Typeable a => SomeSymbol -> f a -> r) -> HK f t -> [r]
+hkToListWithTag f (HK trmap) = TRMap.toListWith (\hkf@(HKField fa) -> f (getFldSym hkf) fa) trmap
+
+getFldSym :: forall fn f x.(KnownSymbol fn) => HKField f (Field fn x) -> SomeSymbol
+getFldSym _ = SomeSymbol (Proxy @fn)
+{-# INLINE getFldSym #-}
 
 pointedHK :: forall f t.GEmptyHK t (TypeFields t) => (forall a. f a) -> HK f t
 pointedHK pointf = HK $ gEmptyHK (Proxy @'(TypeFields t, t)) pointf
