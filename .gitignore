@@ -12,6 +12,7 @@ cabal-dev
 .cabal-sandbox/
 dist-*
 cabal.sandbox.config
+cabal.project.local
 *.prof
 *.aux
 *.hp

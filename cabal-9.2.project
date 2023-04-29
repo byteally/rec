@@ -1,0 +1,10 @@
+compiler: ghc
+with-compiler: ghc-9.2
+packages:
+ rec
+ rec-aeson
+
+source-repository-package
+  type: git
+  location: git@github.com:byteally/hedgehog-gen
+  tag: 7726d252838b10d642de11d18a29434f8ed7b3b1

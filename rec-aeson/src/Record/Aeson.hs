@@ -18,9 +18,10 @@
 
 module Record.Aeson where
 
-import Record
+import Record hiding ((.=)) -- TODO: Fix hiding
+import qualified Record as R 
 import Data.Aeson
-import Data.Aeson.Types as A
+import qualified Data.Aeson.Types as A
 import qualified GHC.Records.Compat as R
 import qualified Data.Text as T
 import Data.Proxy
@@ -29,29 +30,30 @@ import Data.Kind
 import Data.Typeable
 import Data.Coerce
 import GHC.Records
+import GHC.OverloadedLabels
 import Data.String
 
 
 newtype Arr f a = Arr (f a)
 
-instance R.HasField "int" Value (Parser Int) where
+instance R.HasField "int" Value (A.Parser Int) where
   hasField val = ( undefined, parseJSON val)
 
-instance R.HasField "bool" Value (Parser Bool) where
+instance R.HasField "bool" Value (A.Parser Bool) where
   hasField val = ( undefined, parseJSON val)
 
-instance R.HasField "obj" Value (Parser Object) where
+instance R.HasField "obj" Value (A.Parser Object) where
   hasField val = ( undefined, parseJSON val)
 
-instance R.HasField "list" Value (Parser (Arr [] Value)) where
+instance R.HasField "list" Value (A.Parser (Arr [] Value)) where
   hasField val = ( undefined, undefined)
 
 instance HasObject sel (IsBase sel) res =>
-  R.HasField sel (Parser (Arr [] Value)) (Parser (Arr [] res)) where
+  R.HasField sel (A.Parser (Arr [] Value)) (A.Parser (Arr [] res)) where
   hasField val = ( undefined, undefined)  
 
 instance (KnownSymbol sel, HasObject sel (IsBase sel) res) =>
-  R.HasField (sel :: Symbol) (Parser Object) (Parser res) where
+  R.HasField (sel :: Symbol) (A.Parser Object) (A.Parser res) where
   hasField pObj = ( undefined, undefined) -- pObj >>= (.: sel)
     where
       sel = T.pack $ symbolVal (Proxy :: Proxy sel)
@@ -59,7 +61,7 @@ instance (KnownSymbol sel, HasObject sel (IsBase sel) res) =>
 newtype Obj (sel :: Symbol) = Obj {getObj :: Object}
 
 class HasObject (sel :: Symbol) (isBase :: Bool) t | sel isBase -> t where
-  lookObj :: Value -> Parser t
+  lookObj :: Value -> A.Parser t
 
 instance HasObject "int" 'True Int where
   lookObj = parseJSON
@@ -93,7 +95,7 @@ instance ( ToJSONRec (FldsTagRec xs (Rec xs)) ) => ToJSON (Rec xs) where
     pairs (toEncodingRec (FldsTagRec @xs xs))
 
 class ToJSONRec t where
-  toJSONRec :: t -> [Pair]
+  toJSONRec :: t -> [A.Pair]
   toEncodingRec :: t -> Series
 
 instance ToJSONRec (FldsTagRec '[] (Rec xs0)) where
@@ -127,7 +129,7 @@ instance ( ToJSONSub (FldsTag xs (Sub t xs)) ) => ToJSON (Sub t xs) where
     pairs (toEncodingSub (FldsTag @xs xs))
 
 class ToJSONSub t where
-  toJSONSub :: t -> [Pair]
+  toJSONSub :: t -> [A.Pair]
   toEncodingSub :: t -> Series
 
 instance ToJSONSub (FldsTag '[] (Sub t xs0)) where
@@ -159,11 +161,11 @@ instance ( FromJSONRec (Rec xs) ) => FromJSON (Rec xs) where
     parseJSONRec @(Rec xs)
 
 class FromJSONRec t where
-  parseJSONRec :: Object -> Parser t
+  parseJSONRec :: Object -> A.Parser t
 
 instance FromJSONRec (Rec '[]) where
   parseJSONRec _ =
-    pure rec_
+    pure end
 
 instance {-# OVERLAPPING #-}
   ( KnownSymbol fn
@@ -174,7 +176,7 @@ instance {-# OVERLAPPING #-}
   parseJSONRec o = do
     xs <- parseJSONRec @(Rec xs) o
     v <- o .:? fromString fld
-    pure (consRec @fn v xs)
+    pure (fromLabel @fn R..= v .& xs)
 
     where
       fld = symbolVal (Proxy :: Proxy fn)
@@ -188,7 +190,7 @@ instance {-# OVERLAPPABLE #-}
   parseJSONRec o = do
     xs <- parseJSONRec @(Rec xs) o
     v <- o .: fromString fld
-    pure (consRec @fn v xs)
+    pure (fromLabel @fn R..= v .& xs)
 
     where
       fld = symbolVal (Proxy :: Proxy fn)
@@ -199,7 +201,7 @@ instance ( FromJSONSub (Sub t xs) ) => FromJSON (Sub t xs) where
     parseJSONSub @(Sub t xs)
 
 class FromJSONSub t where
-  parseJSONSub :: Object -> Parser t
+  parseJSONSub :: Object -> A.Parser t
 
 instance FromJSONSub (Sub t '[]) where
   parseJSONSub _ = pure sub_
