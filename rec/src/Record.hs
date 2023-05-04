@@ -68,6 +68,7 @@ module Record
 
   -- TODO: Analysis
   , DistSubHK
+  , HKField
   , GenFields
   , GenFieldsSym
   , Project
