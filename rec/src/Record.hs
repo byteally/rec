@@ -47,6 +47,7 @@ module Record
   , toRec
   , recToListWith
   , hrecToListWith
+  , hrecToListWithTag
   , hrecToHKOfRec
   , hoistHRec
   , hoistWithKeyHRec
@@ -612,6 +613,10 @@ recToListWith f (Rec tmap) = TMap.toListWith f tmap
 
 hrecToListWith :: forall r f fs. (forall a. Typeable a => f a -> r) -> HRec f fs -> [r]
 hrecToListWith f (HRec trmap) = TRMap.toListWith (\(HKField fa) -> f fa) trmap
+
+hrecToListWithTag :: forall r f fs. (forall a. Typeable a => SomeSymbol -> f a -> r) -> HRec f fs -> [r]
+hrecToListWithTag f (HRec trmap) = TRMap.toListWith (\hkf@(HKField fa) -> f (getFldSym hkf) fa) trmap
+{-# INLINE hrecToListWithTag #-}
 
 hoistHRec :: forall f g t.(forall a.f a -> g a) -> HRec f t -> HRec g t
 hoistHRec f (HRec trmap) = HRec $ TRMap.hoist (\(HKField fa) -> HKField (f fa)) trmap
