@@ -15,6 +15,7 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE CPP                 #-}
 module Record.Internal where
 
 import Data.Kind
@@ -105,7 +106,9 @@ instance HasField fn t ft => HasField (fn :: Symbol) (Field s t) ft where
   {-# INLINE getField #-}
 
 infix 6 := 
+#if __GLASGOW_HASKELL__ > 900
 {-# INLINE (:=) #-}
+#endif
 pattern (:=) :: Label fn v -> v -> Field fn v
 pattern (:=) lab v <- ((Label,) -> (lab, Field v)) where
   (:=) lab v = Field v
