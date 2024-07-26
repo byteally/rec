@@ -106,7 +106,7 @@ instance HasField fn t ft => HasField (fn :: Symbol) (Field s t) ft where
   {-# INLINE getField #-}
 
 infix 6 := 
-#if __GLASGOW_HASKELL__ > 900
+#if __GLASGOW_HASKELL__ >= 900
 {-# INLINE (:=) #-}
 #endif
 pattern (:=) :: Label fn v -> v -> Field fn v

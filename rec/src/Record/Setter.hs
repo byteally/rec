@@ -15,6 +15,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE CPP                 #-}
 module Record.Setter
   ( SetField (..)
   , setField
@@ -29,14 +30,28 @@ import Data.Type.Equality
 
 
 -- something like this should exist with RecordDotSyntax
+#if __GLASGOW_HASKELL__ >= 900
 type SetField :: forall {k} . k -> Type -> Type -> Constraint
+#endif
 class SetField (n :: k) (r :: Type) (v :: Type) | n r -> v where
   modifyField :: (v -> v) -> r -> r
 
 -- Argument is flipped (a -> r -> r) in the latest proposal
 -- https://github.com/adamgundry/ghc-proposals/blob/hasfield-redesign/proposals/0000-hasfield-redesign.rst
-setField :: forall {k} (x :: k) (r :: Type) (a :: Type).SetField x r a => r -> a -> r
-setField r v = modifyField @x (\_ -> v) r
+setField :: 
+#if __GLASGOW_HASKELL__ >= 900
+  forall {k} 
+#else
+  forall k
+#endif
+  (x :: k) (r :: Type) (a :: Type).SetField x r a => r -> a -> r
+setField r v = 
+  modifyField 
+#if __GLASGOW_HASKELL__ >= 900
+  @x (\_ -> v) r
+#else
+  @k @x (\_ -> v) r
+#endif
 
 
 {-
