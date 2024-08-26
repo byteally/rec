@@ -66,6 +66,7 @@ module Record
   , end
   , AnonRec (..)
   , Label
+  , FromHK
 
   -- TODO: Analysis
   , DistSubHK
