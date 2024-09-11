@@ -204,8 +204,8 @@ instance (GTo hk f, GTo hk g) => GTo hk (f :*: g) where
   gTo (f :*: g) tmap = gTo g (gTo f tmap)
 
 -- TODO: Have type custom error for hk eq failure
-instance (KnownSymbol fn, Typeable a, hk ~ hk', Coercible (hk' a) (hk' (Field fn a))) => GTo hk (S1 ('MetaSel ('Just fn) _1 _2 _3) (K1 k (hk' a))) where
-  gTo (M1 (K1 v)) tmap = TRMap.insert ((coerce :: hk' a -> hk' (Field fn a)) v) tmap
+instance (KnownSymbol fn, Typeable a, hk ~ hk', Coercible (hk' a) (hk' (Field fn a))) => GTo (HKField hk) (S1 ('MetaSel ('Just fn) _1 _2 _3) (K1 k (hk' a))) where
+  gTo (M1 (K1 v)) tmap = TRMap.insert (HKField v :: HKField hk' (Field fn a)) tmap
 
 instance TypeError ('Text "Panic @GTo! The constructor does not have named fields") => GTo hk (S1 ('MetaSel 'Nothing _1 _2 _3) k1) where
   gTo = error "Panic: Unreachable code"
