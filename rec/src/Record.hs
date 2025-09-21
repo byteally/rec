@@ -40,6 +40,7 @@ module Record
   , hoistWithKeyHK
   , hoistWithKeyAndTagHK
   , hoistHKA
+  , hoistWithKeyHKA
   , hkToListWith
   , hkToListWithTag
   , toHKOfSub
@@ -90,11 +91,17 @@ import Data.TypeRepMap (TypeRepMap)
 import Data.TMap (TMap)
 import qualified Data.TMap as TMap
 import qualified Data.TypeRepMap as TRMap
+import qualified Data.TypeRepMap.Internal as TRMapInt
 import Data.Typeable
+import qualified Type.Reflection as TyRefl
 import GHC.Generics
 import Record.Internal
 import Data.Functor.Identity
 import Data.Functor.Const (Const(..))
+import GHC.IsList
+import Control.Monad.Zip (mzip)
+import Data.Primitive.Array (mapArray')
+import Unsafe.Coerce
 
 
 newtype Sub t (xs :: [Symbol]) = Sub TMap
@@ -277,6 +284,20 @@ hoistWithKeyAndTagHK f (HK trmap) = HK $ TRMap.hoistWithKey (\hkf@(HKField fa) -
 hoistHKA :: forall f g m t.Applicative m =>(forall a.f a -> m (g a)) -> HK f t -> m (HK g t)
 hoistHKA f (HK trmap) = HK <$> TRMap.hoistA (\(HKField fa) -> HKField <$> (f fa)) trmap
 {-# INLINE hoistHKA #-}
+
+hoistWithKeyHKA :: forall f g m t.Applicative m =>(forall a. Typeable a => f a -> m (g a)) -> HK f t -> m (HK g t)
+hoistWithKeyHKA f (HK trmap) = HK <$> hoistWithKeyA' (\(HKField fa) -> HKField <$> (f fa)) trmap
+{-# INLINE hoistWithKeyHKA #-}
+
+hoistWithKeyA' :: forall f g t. (Applicative t) => (forall x. Typeable x => f x -> t (g x)) -> TypeRepMap f -> t (TypeRepMap g)
+hoistWithKeyA' f (TRMapInt.TypeRepMap as bs ans ks) = (\newAns -> TRMapInt.TypeRepMap as bs (mapArray' TRMapInt.toAny newAns) ks) <$> newAnss
+  where
+    newAnss = traverse id $ mapArray' mapAns (mzip ans ks) -- :: t (Array (g x0))
+    mapAns (a, k) = withTr (unsafeCoerce k) $ TRMapInt.fromAny a
+    
+    withTr :: forall x. TyRefl.TypeRep x -> f x -> t (g x)
+    withTr t = TyRefl.withTypeable t f
+{-# INLINE hoistWithKeyA' #-}
 
 hkToListWith :: forall r f t. (forall a. Typeable a => f a -> r) -> HK f t -> [r]
 hkToListWith f (HK trmap) = TRMap.toListWith (\(HKField fa) -> f fa) trmap
