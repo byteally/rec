@@ -552,7 +552,7 @@ instance (ChkRecCompat t (ChkRecCompat' t (Rep t) '(() :: Constraint, xs))) => V
 
 type family ChkRecCompat (t :: Type) (res :: (Constraint, [(Symbol, Type)])) :: Constraint where
   ChkRecCompat _ '(cxt, '[]) = cxt
-  ChkRecCompat t '(cxt, ('(fn, ft) ': xs)) = (TypeError ('Text "Extraneous field"), ChkRecCompat t '(cxt, xs))
+  ChkRecCompat t '(cxt, ('(fn, ft) ': xs)) = (TypeError ('Text "Extraneous field: " ':<>: 'ShowType fn), ChkRecCompat t '(cxt, xs))
   
 type family ChkRecCompat' (t :: Type) (rep :: Type -> Type) (acc :: (Constraint, [(Symbol, Type)])) :: (Constraint, [(Symbol, Type)]) where
   ChkRecCompat' t (D1 i f) acc = ChkRecCompat' t f acc
@@ -560,12 +560,16 @@ type family ChkRecCompat' (t :: Type) (rep :: Type -> Type) (acc :: (Constraint,
   ChkRecCompat' t (C1 ('MetaCons cn _ 'False) _) _ = TypeError ('Text "The constructor " ':<>: 'ShowType cn ':<>: 'Text " does not have named fields")
   ChkRecCompat' t (C1 i c) acc = ChkRecCompat' t c acc
   ChkRecCompat' t (f :*: g) acc = ChkRecCompat' t g (ChkRecCompat' t f acc)
-  ChkRecCompat' t (S1 ('MetaSel ('Just sn) _ _ _) (K1 i ft)) '(cxt, xs) = DoesFieldMatches t sn ft xs (LookupField t sn xs) cxt
+  ChkRecCompat' t (S1 ('MetaSel ('Just sn) _ _ _) (K1 i ft)) '(cxt, xs) = DoesFieldMatches t sn ft xs (LookupField t sn ft xs) cxt
 
-type family LookupField (t :: Type) (fn :: Symbol) (fs :: [(Symbol, Type)]) :: [(Symbol, Type)] where
-  LookupField t fn ('(fn, _) ': fs) = fs
-  LookupField t fn (n ': fs) = n ': LookupField t fn fs
-  LookupField t fn '[] = '[]
+type family LookupField (t :: Type) (fn :: Symbol) (expty :: Type) (fs :: [(Symbol, Type)]) :: [(Symbol, Type)] where
+  LookupField t fn expty ('(fn, expty) ': fs) = fs
+  LookupField t fn expty ('(fn, actty) ': fs) = TypeError ( 'Text "Type mismatch in field: " ':<>: 'ShowType fn
+                                                          :$$: 'Text "Expected: " ':<>: 'ShowType expty
+                                                          :$$: 'Text "Actual: " ':<>: 'ShowType actty
+                                                          )
+  LookupField t fn expty (n ': fs) = n ': LookupField t fn expty fs
+  LookupField t fn _ '[] = '[]
 
 type family DoesFieldMatches (t :: Type) (fn :: Symbol) (ft :: Type) (prevFlds ::[(Symbol, Type)]) (newFlds :: [(Symbol, Type)]) (accCxt :: Constraint) :: (Constraint, [(Symbol, Type)]) where
   DoesFieldMatches t fn ft fs fs acc = '((acc, TypeError ('Text "Field not found " :<>: 'ShowType fn ':<>: 'Text "in type " ':<>: 'ShowType t)), fs)
